@@ -24,19 +24,79 @@ func IsDestructiveQuery(query string) bool {
 
 func splitSQLStatements(query string) []string {
 	out := make([]string, 0, strings.Count(query, ";")+1)
-	for part := range strings.SplitSeq(query, ";") {
-		if trimmed := strings.TrimSpace(part); trimmed != "" {
-			out = append(out, trimmed)
+	start := 0
+	quote := byte(0)
+	for i := 0; i < len(query); i++ {
+		c := query[i]
+		if quote != 0 {
+			if c == '\\' && quote == '\'' && i+1 < len(query) {
+				i++
+				continue
+			}
+			if c == quote {
+				if i+1 < len(query) && query[i+1] == quote {
+					i++
+					continue
+				}
+				quote = 0
+			}
+			continue
 		}
+		switch c {
+		case '\'', '"', '`':
+			quote = c
+		case ';':
+			if trimmed := strings.TrimSpace(query[start:i]); trimmed != "" {
+				out = append(out, trimmed)
+			}
+			start = i + 1
+		}
+	}
+	if trimmed := strings.TrimSpace(query[start:]); trimmed != "" {
+		out = append(out, trimmed)
 	}
 	return out
 }
 
 func isDestructiveStatement(stmt string) bool {
-	upper := strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(strings.ToUpper(stmt))
+	upper := strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(strings.ToUpper(stripQuotedSQL(stmt)))
 	return slices.ContainsFunc(destructiveWords, func(word string) bool {
 		return containsWord(upper, word)
 	})
+}
+
+func stripQuotedSQL(stmt string) string {
+	var out strings.Builder
+	out.Grow(len(stmt))
+	quote := byte(0)
+	for i := 0; i < len(stmt); i++ {
+		c := stmt[i]
+		if quote != 0 {
+			out.WriteByte(' ')
+			if c == '\\' && quote == '\'' && i+1 < len(stmt) {
+				i++
+				out.WriteByte(' ')
+				continue
+			}
+			if c == quote {
+				if i+1 < len(stmt) && stmt[i+1] == quote {
+					i++
+					out.WriteByte(' ')
+					continue
+				}
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '\'', '"', '`':
+			quote = c
+			out.WriteByte(' ')
+		default:
+			out.WriteByte(c)
+		}
+	}
+	return out.String()
 }
 
 func containsWord(q, word string) bool {
