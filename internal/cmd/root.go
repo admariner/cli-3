@@ -48,6 +48,7 @@ import (
 	"github.com/planetscale/cli/internal/cmd/region"
 	"github.com/planetscale/cli/internal/cmd/shell"
 	"github.com/planetscale/cli/internal/cmd/signup"
+	"github.com/planetscale/cli/internal/cmd/sql"
 	"github.com/planetscale/cli/internal/cmd/token"
 	"github.com/planetscale/cli/internal/cmd/version"
 	"github.com/planetscale/cli/internal/cmd/webhook"
@@ -118,6 +119,14 @@ func Execute(ctx context.Context, sigc chan os.Signal, signals []os.Signal, ver,
 		return 0
 	}
 
+	var cmdErr *cmdutil.Error
+	if errors.As(err, &cmdErr) && cmdErr.Handled {
+		if cmdErr.ExitCode != 0 {
+			return cmdErr.ExitCode
+		}
+		return cmdutil.ActionRequestedExitCode
+	}
+
 	// print any user specific messages first
 	switch format {
 	case printer.JSON:
@@ -127,7 +136,6 @@ func Execute(ctx context.Context, sigc chan os.Signal, signals []os.Signal, ver,
 	}
 
 	// check if a sub command wants to return a specific exit code
-	var cmdErr *cmdutil.Error
 	if errors.As(err, &cmdErr) {
 		return cmdErr.ExitCode
 	}
@@ -311,6 +319,10 @@ func runCmd(ctx context.Context, ver, commit, buildDate string, format *printer.
 	shellCmd := shell.ShellCmd(ch, sigc, signals...)
 	shellCmd.GroupID = "database"
 	rootCmd.AddCommand(shellCmd)
+
+	sqlCmd := sql.SQLCmd(ch)
+	sqlCmd.GroupID = "database"
+	rootCmd.AddCommand(sqlCmd)
 
 	workflowCmd := workflow.WorkflowCmd(ch)
 	workflowCmd.GroupID = "vitess"
