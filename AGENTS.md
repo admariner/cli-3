@@ -2,6 +2,15 @@
 
 For **any** automated agent or script using `pscale`. Always pass **`--format json`**. Substitute placeholders from the user's request or from prior command output (`org list`, `database list`, `branch list`).
 
+If you only have the installed `pscale` binary, start here:
+
+```bash
+pscale agent-guide --format json
+pscale auth check --format json
+```
+
+Use direct CLI automation for shell commands and scripts. Use the hosted PlanetScale MCP server for MCP clients.
+
 | Placeholder | Meaning |
 |-------------|---------|
 | `<org>` | Organization name |
@@ -31,7 +40,13 @@ pscale --org <org> database list --format json
 
 ## Workflow
 
-1. **Auth** — check before anything else:
+1. **Guide** — discover machine-readable conventions when you do not have this file:
+
+   ```bash
+   pscale agent-guide --format json
+   ```
+
+2. **Auth** — check before anything else:
 
    ```bash
    pscale auth check --format json
@@ -39,7 +54,7 @@ pscale --org <org> database list --format json
 
    `"status": "ok"` and `"authenticated": true` with no blocking `issues` means proceed. `"status": "action_required"` exits non-zero — log in, pick an org, or fix credentials (see `issues` and `next_steps`).
 
-2. **Login** (when not authenticated):
+3. **Login** (when not authenticated):
 
    ```bash
    pscale auth login --format json
@@ -47,7 +62,7 @@ pscale --org <org> database list --format json
 
    Pending JSON is written to **stderr** while waiting; **stdout** has a single final JSON object when login completes (`status: ok` or `action_required` if org setup fails after credentials are saved). Fields include `verification_url`, `user_code`, and `browser_opened`. Open `verification_url` manually if the browser does not open. Do not retry login in a loop without browser access.
 
-3. **Organization** — use `"organization"` from `auth check`, ask the user, or list orgs:
+4. **Organization** — use `"organization"` from `auth check`, ask the user, or list orgs:
 
    ```bash
    pscale org list --format json
@@ -55,14 +70,14 @@ pscale --org <org> database list --format json
 
    Pass `--org <org>` on resource commands (`database`, `branch`, `sql`, `api`, …). Not on `org list`.
 
-4. **Discover resources** before SQL:
+5. **Discover resources** before SQL:
 
    ```bash
    pscale database list --org <org> --format json
    pscale branch list <database> --org <org> --format json
    ```
 
-5. **Query** (read-only default):
+6. **Query** (read-only default):
 
    ```bash
    pscale sql <database> <branch> --org <org> --format json --query "SELECT 1"
@@ -145,3 +160,15 @@ Destructive SQL without `--force`: `status: "action_required"`, `query_kind: "de
 ```bash
 pscale api --org <org> organizations/<org>/databases
 ```
+
+## MCP
+
+For MCP clients, use the hosted PlanetScale MCP server:
+
+```text
+https://mcp.pscale.dev/mcp/planetscale
+```
+
+See the current MCP docs: https://planetscale.com/docs/connect/mcp
+
+Do not use the deprecated local `pscale mcp server` path unless you explicitly need backward compatibility with an old setup.

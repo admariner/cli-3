@@ -5,12 +5,30 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 
 	"github.com/planetscale/cli/internal/cmdutil"
+	"github.com/planetscale/cli/internal/printer"
 	"github.com/spf13/cobra"
 	"github.com/tidwall/jsonc"
 )
+
+const (
+	hostedMCPURL  = "https://mcp.pscale.dev/mcp/planetscale"
+	mcpDocsURL    = "https://planetscale.com/docs/connect/mcp"
+	claudeCodeCmd = `claude mcp add --transport http "planetscale" https://mcp.pscale.dev/mcp/planetscale`
+)
+
+type installResponse struct {
+	Status       string   `json:"status"`
+	Target       string   `json:"target,omitempty"`
+	ConfigPath   string   `json:"config_path,omitempty"`
+	BackupPath   string   `json:"backup_path,omitempty"`
+	HostedMCPURL string   `json:"hosted_mcp_url"`
+	DocsURL      string   `json:"docs_url"`
+	Command      string   `json:"command,omitempty"`
+	Message      string   `json:"message"`
+	NextSteps    []string `json:"next_steps,omitempty"`
+}
 
 // InstallCmd returns a new cobra.Command for the mcp install command.
 func InstallCmd(ch *cmdutil.Helper) *cobra.Command {
@@ -18,62 +36,102 @@ func InstallCmd(ch *cmdutil.Helper) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "install",
-		Short: "Install the MCP server",
-		Long:  `Install the PlanetScale model context protocol (MCP) server.`,
+		Short: "Install the hosted MCP server",
+		Long: `Install the hosted PlanetScale model context protocol (MCP) server.
+
+For clients this command cannot safely configure, it prints the current hosted
+MCP setup instructions instead of installing the deprecated local stdio server.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var configPath string
 			var err error
 
 			switch target {
-			case "claude":
-				configPath, err = getClaudeConfigPath()
-				if err != nil {
-					return fmt.Errorf("failed to determine Claude config path: %w", err)
-				}
-				if err := installMCPServer(configPath, target, modifyClaudeConfig); err != nil {
-					return err
-				}
 			case "cursor":
 				configPath, err = getCursorConfigPath()
 				if err != nil {
 					return fmt.Errorf("failed to determine Cursor config path: %w", err)
 				}
-				// Cursor uses the same config structure as Claude
-				if err := installMCPServer(configPath, target, modifyClaudeConfig); err != nil {
-					return err
-				}
-			case "zed":
-				configPath, err = getZedConfigPath()
+				backupPath, err := installMCPServer(configPath, target, modifyCursorConfig)
 				if err != nil {
-					return fmt.Errorf("failed to determine Zed config path: %w", err)
-				}
-				if err := installMCPServer(configPath, target, modifyZedConfig); err != nil {
 					return err
 				}
+				return printInstallResponse(ch, installResponse{
+					Status:       "ok",
+					Target:       target,
+					ConfigPath:   configPath,
+					BackupPath:   backupPath,
+					HostedMCPURL: hostedMCPURL,
+					DocsURL:      mcpDocsURL,
+					Message:      fmt.Sprintf("Hosted MCP server configured for %s", target),
+				})
+			case "claude", "claude-code":
+				return printInstallResponse(ch, installResponse{
+					Status:       "action_required",
+					Target:       "claude-code",
+					HostedMCPURL: hostedMCPURL,
+					DocsURL:      mcpDocsURL,
+					Command:      claudeCodeCmd,
+					Message:      "Claude Code uses the hosted MCP server. Run the command in next_steps to install it.",
+					NextSteps: []string{
+						claudeCodeCmd,
+					},
+				})
+			case "zed":
+				return printInstallResponse(ch, installResponse{
+					Status:       "action_required",
+					Target:       target,
+					HostedMCPURL: hostedMCPURL,
+					DocsURL:      mcpDocsURL,
+					Message:      "Zed hosted MCP setup is documented in the current PlanetScale MCP docs.",
+					NextSteps: []string{
+						mcpDocsURL,
+					},
+				})
 			default:
-				return fmt.Errorf("invalid target vendor: %s (supported values: claude, cursor, zed)", target)
+				return fmt.Errorf("invalid target vendor: %s (supported values: cursor, claude-code, zed)", target)
 			}
-
-			fmt.Printf("MCP server successfully configured for %s at %s\n", target, configPath)
-			return nil
 		},
 	}
 
-	cmd.Flags().StringVar(&target, "target", "", "Target vendor for MCP installation (required). Possible values: [claude, cursor, zed]")
+	cmd.Flags().StringVar(&target, "target", "", "Target vendor for MCP installation (required). Possible values: [cursor, claude-code, zed]")
 	cmd.MarkFlagRequired("target")
 	cmd.RegisterFlagCompletionFunc("target", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return []string{"claude", "cursor", "zed"}, cobra.ShellCompDirectiveDefault
+		return []string{"cursor", "claude-code", "zed"}, cobra.ShellCompDirectiveDefault
 	})
 
 	return cmd
 }
 
+func printInstallResponse(ch *cmdutil.Helper, resp installResponse) error {
+	if ch.Printer.Format() == printer.JSON {
+		return ch.Printer.PrintJSON(resp)
+	}
+
+	switch resp.Status {
+	case "ok":
+		fmt.Printf("%s\n", resp.Message)
+		if resp.ConfigPath != "" {
+			fmt.Printf("Config path: %s\n", resp.ConfigPath)
+		}
+		if resp.BackupPath != "" {
+			fmt.Printf("Created backup at %s\n", resp.BackupPath)
+		}
+	default:
+		fmt.Printf("%s\n", resp.Message)
+		if resp.Command != "" {
+			fmt.Printf("\n  %s\n", resp.Command)
+		}
+		fmt.Printf("\nSee %s\n", resp.DocsURL)
+	}
+	return nil
+}
+
 // installMCPServer handles common file I/O for all editors
-func installMCPServer(configPath string, target string, modifyConfig func(map[string]any) error) error {
+func installMCPServer(configPath string, target string, modifyConfig func(map[string]any) error) (string, error) {
 	// Check if config directory exists
 	configDir := filepath.Dir(configPath)
 	if _, err := os.Stat(configDir); os.IsNotExist(err) {
-		return fmt.Errorf("no %s installation: path %s not found", target, configDir)
+		return "", fmt.Errorf("no %s installation: path %s not found", target, configDir)
 	}
 
 	// Read existing config or create empty settings
@@ -81,44 +139,44 @@ func installMCPServer(configPath string, target string, modifyConfig func(map[st
 	if fileData, err := os.ReadFile(configPath); err == nil {
 		cleanJSON := jsonc.ToJSON(fileData)
 		if err := json.Unmarshal(cleanJSON, &fullSettings); err != nil {
-			return fmt.Errorf("failed to parse %s config file: %w", target, err)
+			return "", fmt.Errorf("failed to parse %s config file: %w", target, err)
 		}
 	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("failed to read %s config file: %w", target, err)
+		return "", fmt.Errorf("failed to read %s config file: %w", target, err)
 	} else {
 		fullSettings = make(map[string]any)
 	}
 
 	// Let the editor-specific function modify the config
 	if err := modifyConfig(fullSettings); err != nil {
-		return err
+		return "", err
 	}
 
 	// Marshal updated config
 	updatedData, err := json.MarshalIndent(fullSettings, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal %s config: %w", target, err)
+		return "", fmt.Errorf("failed to marshal %s config: %w", target, err)
 	}
 
 	// Backup existing file before writing
+	var backupPath string
 	if _, err := os.Stat(configPath); err == nil {
-		backupPath := configPath + "~"
+		backupPath = configPath + "~"
 		if err := os.Rename(configPath, backupPath); err != nil {
-			return fmt.Errorf("failed to create backup: %w", err)
+			return "", fmt.Errorf("failed to create backup: %w", err)
 		}
-		fmt.Printf("Created backup at %s\n", backupPath)
 	}
 
 	// Write updated config
 	if err := os.WriteFile(configPath, updatedData, 0644); err != nil {
-		return fmt.Errorf("failed to write %s config file: %w", target, err)
+		return "", fmt.Errorf("failed to write %s config file: %w", target, err)
 	}
 
-	return nil
+	return backupPath, nil
 }
 
-// modifyClaudeConfig adds planetscale to mcpServers (Claude and Cursor both use this)
-func modifyClaudeConfig(settings map[string]any) error {
+// modifyCursorConfig adds the hosted PlanetScale MCP server to Cursor.
+func modifyCursorConfig(settings map[string]any) error {
 	var mcpServers map[string]any
 	if existingServers, ok := settings["mcpServers"].(map[string]any); ok {
 		mcpServers = existingServers
@@ -127,49 +185,11 @@ func modifyClaudeConfig(settings map[string]any) error {
 	}
 
 	mcpServers["planetscale"] = map[string]any{
-		"command": "pscale",
-		"args":    []string{"mcp", "server"},
+		"url": hostedMCPURL,
 	}
 
 	settings["mcpServers"] = mcpServers
 	return nil
-}
-
-// modifyZedConfig adds planetscale to context_servers (Zed-specific)
-func modifyZedConfig(settings map[string]any) error {
-	var contextServers map[string]any
-	if existingServers, ok := settings["context_servers"].(map[string]any); ok {
-		contextServers = existingServers
-	} else {
-		contextServers = make(map[string]any)
-	}
-
-	contextServers["planetscale"] = map[string]any{
-		"source":  "custom",
-		"command": "pscale",
-		"args":    []string{"mcp", "server"},
-	}
-
-	settings["context_servers"] = contextServers
-	return nil
-}
-
-// getClaudeConfigPath returns the path to the Claude Desktop config file based on the OS
-func getClaudeConfigPath() (string, error) {
-	switch runtime.GOOS {
-	case "darwin":
-		// macOS path: ~/Library/Application Support/Claude/claude_desktop_config.json
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("could not determine user home directory: %w", err)
-		}
-		return filepath.Join(homeDir, "Library", "Application Support", "Claude", "claude_desktop_config.json"), nil
-	case "windows":
-		// Windows path: %APPDATA%\Claude\claude_desktop_config.json
-		return filepath.Join(os.Getenv("APPDATA"), "Claude", "claude_desktop_config.json"), nil
-	default:
-		return "", fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
-	}
 }
 
 // getCursorConfigPath returns the path to the Cursor MCP config file
@@ -181,21 +201,4 @@ func getCursorConfigPath() (string, error) {
 
 	// Cursor uses ~/.cursor/mcp.json for its MCP configuration
 	return filepath.Join(homeDir, ".cursor", "mcp.json"), nil
-}
-
-// getZedConfigPath returns the path to the Zed config file based on the OS
-func getZedConfigPath() (string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("could not determine user home directory: %w", err)
-	}
-
-	switch runtime.GOOS {
-	case "darwin", "linux":
-		return filepath.Join(homeDir, ".config", "zed", "settings.json"), nil
-	case "windows":
-		return filepath.Join(os.Getenv("APPDATA"), "Zed", "settings.json"), nil
-	default:
-		return "", fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
-	}
 }

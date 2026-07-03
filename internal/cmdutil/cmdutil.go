@@ -2,6 +2,7 @@ package cmdutil
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -146,11 +147,52 @@ func RequiredArgs(reqArgs ...string) cobra.PositionalArgs {
 func CheckAuthentication(cfg *config.Config) func(cmd *cobra.Command, args []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		if err := cfg.IsAuthenticated(); err != nil {
+			if commandFormat(cmd) == printer.JSON.String() {
+				resp := struct {
+					Status            string              `json:"status"`
+					Authenticated     bool                `json:"authenticated"`
+					Code              string              `json:"code"`
+					Error             string              `json:"error"`
+					AgentGuideCommand string              `json:"agent_guide_command"`
+					Issues            []map[string]string `json:"issues"`
+					NextSteps         []string            `json:"next_steps"`
+				}{
+					Status:            "action_required",
+					Authenticated:     false,
+					Code:              "NO_AUTH",
+					Error:             err.Error(),
+					AgentGuideCommand: AgentGuideCmd(),
+					Issues: []map[string]string{
+						{
+							"code":        "NO_AUTH",
+							"message":     err.Error(),
+							"remediation": "Run `pscale auth login --format json`",
+						},
+					},
+					NextSteps: []string{
+						AgentAuthLoginCmd(),
+						AgentAuthCheckCmd(),
+					},
+				}
+				buf, marshalErr := json.MarshalIndent(resp, "", "  ")
+				if marshalErr != nil {
+					return marshalErr
+				}
+				fmt.Fprintln(os.Stdout, string(buf))
+				return JSONReportedError(ActionRequestedExitCode)
+			}
 			return fmt.Errorf("%s\nError: %s", WarnAuthMessage, err.Error())
 		}
 
 		return nil
 	}
+}
+
+func commandFormat(cmd *cobra.Command) string {
+	if flag := cmd.Flag("format"); flag != nil {
+		return flag.Value.String()
+	}
+	return printer.Human.String()
 }
 
 // NewZapLogger returns a logger to be used with the sql-proxy. By default it

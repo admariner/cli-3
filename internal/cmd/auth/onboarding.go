@@ -18,18 +18,20 @@ type AuthIssue struct {
 
 // AuthCheckResponse is the JSON payload for `pscale auth check --format json`.
 type AuthCheckResponse struct {
-	Status        string      `json:"status"`
-	Authenticated bool        `json:"authenticated"`
-	AuthMethod    string      `json:"auth_method,omitempty"`
-	Organization  string      `json:"organization,omitempty"`
-	APIURL        string      `json:"api_url,omitempty"`
-	Issues        []AuthIssue `json:"issues,omitempty"`
-	NextSteps     []string    `json:"next_steps,omitempty"`
+	Status            string      `json:"status"`
+	Authenticated     bool        `json:"authenticated"`
+	AuthMethod        string      `json:"auth_method,omitempty"`
+	Organization      string      `json:"organization,omitempty"`
+	APIURL            string      `json:"api_url,omitempty"`
+	AgentGuideCommand string      `json:"agent_guide_command,omitempty"`
+	Issues            []AuthIssue `json:"issues,omitempty"`
+	NextSteps         []string    `json:"next_steps,omitempty"`
 }
 
 func buildAuthCheckResponse(ctx context.Context, ch *cmdutil.Helper) AuthCheckResponse {
 	resp := AuthCheckResponse{
-		APIURL: ch.Config.BaseURL,
+		APIURL:            ch.Config.BaseURL,
+		AgentGuideCommand: cmdutil.AgentGuideCmd(),
 	}
 
 	org := configuredOrganization(ch)
