@@ -8,11 +8,11 @@ import (
 	"github.com/planetscale/cli/internal/sqlquery"
 )
 
-func reportJSON(ch *cmdutil.Helper, v any) error {
+func reportJSON(ch *cmdutil.Helper, v any, exitCode int) error {
 	if err := ch.Printer.PrintJSON(v); err != nil {
 		return err
 	}
-	return cmdutil.JSONReportedError(cmdutil.ActionRequestedExitCode)
+	return cmdutil.JSONReportedError(exitCode)
 }
 
 func handleExecuteError(ch *cmdutil.Helper, err error, database, branch string) error {
@@ -36,7 +36,7 @@ func handleExecuteError(ch *cmdutil.Helper, err error, database, branch string) 
 				"Ask the user to approve this destructive query",
 				cmdutil.AgentSQLCmd(ch.Config.Organization, database, branch, true),
 			},
-		})
+		}, cmdutil.ActionRequestedExitCode)
 	}
 
 	return reportJSON(ch, map[string]any{
@@ -46,5 +46,5 @@ func handleExecuteError(ch *cmdutil.Helper, err error, database, branch string) 
 			cmdutil.AgentAuthCheckCmd(),
 			cmdutil.AgentSQLCmd(ch.Config.Organization, database, branch, false),
 		},
-	})
+	}, cmdutil.FatalErrExitCode)
 }

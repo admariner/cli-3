@@ -191,7 +191,7 @@ func printRootOrgFlagError(format printer.Format, err error) int {
 			fmt.Fprintf(os.Stderr, `{"error": "%s"}`, err)
 			return cmdutil.FatalErrExitCode
 		}
-		fmt.Fprint(os.Stderr, buf.String())
+		fmt.Fprint(os.Stdout, buf.String())
 		return cmdutil.FatalErrExitCode
 	}
 

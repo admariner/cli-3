@@ -71,6 +71,9 @@ func TestSQLCmdDestructiveQueryReturnsActionRequiredJSON(t *testing.T) {
 	if !errors.As(err, &cmdErr) || !cmdErr.Handled {
 		t.Fatalf("expected handled JSONReportedError, got %v", err)
 	}
+	if cmdErr.ExitCode != cmdutil.ActionRequestedExitCode {
+		t.Fatalf("exit code = %d", cmdErr.ExitCode)
+	}
 
 	var resp map[string]any
 	if err := json.Unmarshal(out.Bytes(), &resp); err != nil {
@@ -81,5 +84,35 @@ func TestSQLCmdDestructiveQueryReturnsActionRequiredJSON(t *testing.T) {
 	}
 	if resp["query_kind"] != "destructive" {
 		t.Fatalf("query_kind = %v", resp["query_kind"])
+	}
+}
+
+func TestHandleExecuteErrorReturnsFatalExitForJSONError(t *testing.T) {
+	format := printer.JSON
+	var out bytes.Buffer
+	ch := &cmdutil.Helper{
+		Printer: printer.NewPrinter(&format),
+		Config:  &config.Config{Organization: "acme"},
+	}
+	ch.Printer.SetResourceOutput(&out)
+
+	err := handleExecuteError(ch, errors.New("query failed"), "mydb", "main")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var cmdErr *cmdutil.Error
+	if !errors.As(err, &cmdErr) || !cmdErr.Handled {
+		t.Fatalf("expected handled JSONReportedError, got %v", err)
+	}
+	if cmdErr.ExitCode != cmdutil.FatalErrExitCode {
+		t.Fatalf("exit code = %d", cmdErr.ExitCode)
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(out.Bytes(), &resp); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if resp["status"] != "error" {
+		t.Fatalf("status = %v", resp["status"])
 	}
 }

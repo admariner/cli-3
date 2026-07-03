@@ -109,6 +109,9 @@ func stripSQLGuardIgnoredText(stmt string) string {
 			continue
 		}
 		switch c {
+		case '#':
+			lineComment = true
+			out.WriteByte(' ')
 		case '-':
 			if i+1 < len(stmt) && stmt[i+1] == '-' {
 				lineComment = true
