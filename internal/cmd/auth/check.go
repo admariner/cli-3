@@ -1,8 +1,9 @@
 package auth
 
 import (
-	"github.com/planetscale/cli/internal/auth"
+	psauth "github.com/planetscale/cli/internal/auth"
 	"github.com/planetscale/cli/internal/cmdutil"
+	"github.com/planetscale/cli/internal/printer"
 
 	"github.com/spf13/cobra"
 )
@@ -17,43 +18,43 @@ func CheckCmd(ch *cmdutil.Helper) *cobra.Command {
 		Args:  cobra.NoArgs,
 		Short: "Check if you are authenticated",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var errorMessage string
+			ctx := cmd.Context()
+			resp := buildAuthCheckResponse(ctx, ch)
 
-			if ch.Config.ServiceTokenIsSet() {
-				errorMessage = "You are not authenticated. Please ensure your service token is valid and properly configured."
-			} else if ch.Config.AccessToken != "" {
-				errorMessage = "You are not authenticated. Please run `pscale auth login` to authenticate."
-			} else {
-				errorMessage = "You are not authenticated. Please run `pscale auth login` to authenticate or set a service token."
-			}
-			if err := ch.Config.IsAuthenticated(); err != nil {
-				return &cmdutil.Error{
-					Msg:      errorMessage,
-					ExitCode: cmdutil.ActionRequestedExitCode,
-				}
-			} else {
-				ctx := cmd.Context()
-				client, err := ch.Client()
-				if err != nil {
+			if ch.Printer.Format() == printer.JSON {
+				if err := ch.Printer.PrintJSON(resp); err != nil {
 					return err
 				}
+				if !resp.Authenticated {
+					return cmdutil.JSONReportedError(cmdutil.ActionRequestedExitCode)
+				}
+				return nil
+			}
 
-				_, err = client.Organizations.List(ctx)
-				if err != nil {
-					return &cmdutil.Error{
-						Msg:      errorMessage,
-						ExitCode: cmdutil.ActionRequestedExitCode,
-					}
-				} else {
-					ch.Printer.Println("You are authenticated.")
-					return nil
+			if !resp.Authenticated {
+				msg := "You are not authenticated."
+				if len(resp.Issues) > 0 {
+					msg = resp.Issues[0].Message
+				}
+				return &cmdutil.Error{
+					Msg:      msg,
+					ExitCode: cmdutil.ActionRequestedExitCode,
 				}
 			}
+
+			ch.Printer.Println("You are authenticated.")
+			if resp.Organization != "" {
+				ch.Printer.Printf("Organization: %s\n", resp.Organization)
+			}
+			for _, issue := range resp.Issues {
+				ch.Printer.Printf("Note: %s — %s\n", issue.Message, issue.Remediation)
+			}
+			return nil
 		},
 	}
 
-	cmd.Flags().StringVar(&clientID, "client-id", auth.OAuthClientID, "The client ID for the PlanetScale CLI application.")
-	cmd.Flags().StringVar(&clientSecret, "client-secret", auth.OAuthClientSecret, "The client ID for the PlanetScale CLI application")
-	cmd.Flags().StringVar(&apiURL, "api-url", auth.DefaultBaseURL, "The PlanetScale base API URL.")
+	cmd.Flags().StringVar(&clientID, "client-id", psauth.OAuthClientID, "The client ID for the PlanetScale CLI application.")
+	cmd.Flags().StringVar(&clientSecret, "client-secret", psauth.OAuthClientSecret, "The client ID for the PlanetScale CLI application")
+	cmd.Flags().StringVar(&apiURL, "api-url", psauth.DefaultBaseURL, "The PlanetScale base API URL.")
 	return cmd
 }
