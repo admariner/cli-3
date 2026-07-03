@@ -1,0 +1,28 @@
+package cmdutil
+
+import "testing"
+
+func TestAgentStepsFlagOrder(t *testing.T) {
+	tests := []struct {
+		name string
+		got  string
+	}{
+		{name: "database list", got: AgentDatabaseListCmd("bb")},
+		{name: "branch list", got: AgentBranchListCmd("bb", "mydb")},
+		{name: "sql", got: AgentSQLCmd("bb", "mydb", "main", false)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if containsBeforeSubcommand(tt.got, "--org") {
+				t.Fatalf("bad flag order: %q", tt.got)
+			}
+		})
+	}
+}
+
+func containsBeforeSubcommand(cmd, flag string) bool {
+	// Reject "pscale --org" (root-level org); want "pscale <subcommand> ... --org".
+	const bad = "pscale --org"
+	return len(cmd) >= len(bad) && cmd[:len(bad)] == bad
+}

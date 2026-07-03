@@ -69,6 +69,35 @@ func RoleFromString(r string) (PasswordRole, error) {
 	return 0, fmt.Errorf("invalid role [%v] requested", r)
 }
 
+// ResolveAccessRole picks the credential access level from --role and --replica,
+// using defaultRole when neither is set (shell uses AdministratorRole; sql uses ReaderRole).
+func ResolveAccessRole(roleFlag string, replica bool, defaultRole PasswordRole) (PasswordRole, error) {
+	if roleFlag != "" {
+		return RoleFromString(roleFlag)
+	}
+	if replica {
+		return ReaderRole, nil
+	}
+	return defaultRole, nil
+}
+
+// PostgresInheritedRoles maps --role to Postgres inherited roles (used by shell and sql).
+// MySQL/Vitess uses branch passwords via passwordutil instead — same --role flag, different API.
+func PostgresInheritedRoles(role PasswordRole) (inherited []string, successor string) {
+	switch role {
+	case ReaderRole:
+		return []string{"pg_read_all_data"}, ""
+	case WriterRole:
+		return []string{"pg_write_all_data"}, ""
+	case ReadWriterRole:
+		return []string{"pg_read_all_data", "pg_write_all_data"}, ""
+	case AdministratorRole:
+		return []string{"postgres"}, "postgres"
+	default:
+		return nil, ""
+	}
+}
+
 // Helper is passed to every single command and is used by individual
 // subcommands.
 type Helper struct {
