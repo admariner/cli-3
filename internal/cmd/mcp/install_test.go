@@ -3,6 +3,7 @@ package mcp
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -63,8 +64,13 @@ func TestInstallCmdClaudeCodeJSON(t *testing.T) {
 
 	cmd := InstallCmd(ch)
 	cmd.SetArgs([]string{"--target", "claude-code"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("execute: %v", err)
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected action_required exit")
+	}
+	var cmdErr *cmdutil.Error
+	if !errors.As(err, &cmdErr) || !cmdErr.Handled {
+		t.Fatalf("expected handled JSON error, got %v", err)
 	}
 
 	var resp installResponse

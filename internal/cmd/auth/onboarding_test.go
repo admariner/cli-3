@@ -54,6 +54,26 @@ func TestAuthCheckExitCode(t *testing.T) {
 	}
 }
 
+func TestInvalidAuthIssueAndNextStepsServiceToken(t *testing.T) {
+	issue, nextSteps := invalidAuthIssueAndNextSteps("service_token")
+	if issue.Code != "SERVICE_TOKEN_INVALID" {
+		t.Fatalf("code = %q", issue.Code)
+	}
+	if len(nextSteps) != 1 || nextSteps[0] != cmdutil.AgentAuthCheckCmd() {
+		t.Fatalf("next steps = %#v", nextSteps)
+	}
+}
+
+func TestInvalidAuthIssueAndNextStepsOAuth(t *testing.T) {
+	issue, nextSteps := invalidAuthIssueAndNextSteps("oauth")
+	if issue.Code != "AUTH_INVALID" {
+		t.Fatalf("code = %q", issue.Code)
+	}
+	if len(nextSteps) != 1 || nextSteps[0] != cmdutil.AgentAuthLoginCmd() {
+		t.Fatalf("next steps = %#v", nextSteps)
+	}
+}
+
 func TestFinishLoginJSONOrgSetupFailure(t *testing.T) {
 	format := printer.JSON
 	var out bytes.Buffer

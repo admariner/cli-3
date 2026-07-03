@@ -76,14 +76,11 @@ func buildAuthCheckResponse(ctx context.Context, ch *cmdutil.Helper) AuthCheckRe
 	}
 
 	if _, err := client.Organizations.List(ctx); err != nil {
+		issue, nextSteps := invalidAuthIssueAndNextSteps(resp.AuthMethod)
 		resp.Status = "action_required"
 		resp.Authenticated = false
-		resp.Issues = append(resp.Issues, AuthIssue{
-			Code:        "AUTH_INVALID",
-			Message:     "API authentication failed",
-			Remediation: "Run `pscale auth login --format json` (browser opens when possible)",
-		})
-		resp.NextSteps = []string{cmdutil.AgentAuthLoginCmd()}
+		resp.Issues = append(resp.Issues, issue)
+		resp.NextSteps = nextSteps
 		return resp
 	}
 
@@ -109,6 +106,24 @@ func buildAuthCheckResponse(ctx context.Context, ch *cmdutil.Helper) AuthCheckRe
 	}
 
 	return resp
+}
+
+func invalidAuthIssueAndNextSteps(authMethod string) (AuthIssue, []string) {
+	if authMethod == "service_token" {
+		issue := AuthIssue{
+			Code:        "SERVICE_TOKEN_INVALID",
+			Message:     "API authentication failed",
+			Remediation: "Verify --service-token-id and --service-token, then re-run `pscale auth check --format json`",
+		}
+		return issue, []string{cmdutil.AgentAuthCheckCmd()}
+	}
+
+	issue := AuthIssue{
+		Code:        "AUTH_INVALID",
+		Message:     "API authentication failed",
+		Remediation: "Run `pscale auth login --format json` (browser opens when possible)",
+	}
+	return issue, []string{cmdutil.AgentAuthLoginCmd()}
 }
 
 func configuredOrganization(ch *cmdutil.Helper) string {

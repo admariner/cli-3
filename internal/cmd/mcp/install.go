@@ -104,7 +104,13 @@ MCP setup instructions instead of installing the deprecated local stdio server.`
 
 func printInstallResponse(ch *cmdutil.Helper, resp installResponse) error {
 	if ch.Printer.Format() == printer.JSON {
-		return ch.Printer.PrintJSON(resp)
+		if err := ch.Printer.PrintJSON(resp); err != nil {
+			return err
+		}
+		if resp.Status == "action_required" {
+			return cmdutil.JSONReportedError(cmdutil.ActionRequestedExitCode)
+		}
+		return nil
 	}
 
 	switch resp.Status {
