@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
-	"slices"
 
 	"github.com/hashicorp/go-cleanhttp"
 	psauth "github.com/planetscale/cli/internal/auth"
@@ -49,21 +48,21 @@ func LoginCmd(ch *cmdutil.Helper) *cobra.Command {
 			browserOpened := cmdutil.TryOpenBrowser(runtime.GOOS, deviceVerification.VerificationCompleteURL) == nil
 
 			if jsonMode {
-				message := loginPendingMessage(browserOpened)
 				pending := LoginPendingResponse{
 					Status:          "pending",
 					VerificationURL: deviceVerification.VerificationCompleteURL,
 					UserCode:        deviceVerification.UserCode,
 					BrowserOpened:   browserOpened,
-					Message:         message,
+					Message:         loginPendingMessage(browserOpened),
 					NextSteps: []string{
 						"Approve access in the browser",
 						cmdutil.AgentAuthCheckCmd(),
 					},
 				}
-				if err := ch.Printer.PrintJSON(pending); err != nil {
+				if err := printJSONEnvelope(cmd.ErrOrStderr(), pending); err != nil {
 					return err
 				}
+				fmt.Fprintln(cmd.ErrOrStderr(), "Waiting for browser authorization...")
 			} else {
 				if !browserOpened {
 					ch.Printer.Printf("Failed to open a browser; open this URL manually: %s\n", printer.Bold(deviceVerification.VerificationCompleteURL))
@@ -78,9 +77,7 @@ func LoginCmd(ch *cmdutil.Helper) *cobra.Command {
 			}
 
 			var end func()
-			if jsonMode {
-				fmt.Fprintln(cmd.ErrOrStderr(), "Waiting for browser authorization...")
-			} else {
+			if !jsonMode {
 				end = ch.Printer.PrintProgress("Waiting for confirmation...")
 				defer end()
 			}
@@ -103,20 +100,14 @@ func LoginCmd(ch *cmdutil.Helper) *cobra.Command {
 				end()
 			}
 
-			if err := writeDefaultOrganizationIfNeeded(ctx, ch, accessToken, authURL); err != nil {
-				return err
-			}
+			orgSetupErr := writeDefaultOrganizationIfNeeded(ctx, ch, accessToken, authURL)
 
 			if jsonMode {
-				ok := LoginOKResponse{
-					Status:  "ok",
-					Message: "Successfully logged in.",
-					NextSteps: []string{
-						cmdutil.AgentAuthCheckCmd(),
-						cmdutil.AgentOrgListCmd(),
-					},
-				}
-				return ch.Printer.PrintJSON(ok)
+				return finishLoginJSON(ch, orgSetupErr)
+			}
+
+			if orgSetupErr != nil {
+				return orgSetupErr
 			}
 
 			ch.Printer.Println("Successfully logged in.")
@@ -131,6 +122,36 @@ func LoginCmd(ch *cmdutil.Helper) *cobra.Command {
 	return cmd
 }
 
+func finishLoginJSON(ch *cmdutil.Helper, orgSetupErr error) error {
+	resp := LoginOKResponse{
+		Status:  "ok",
+		Message: "Successfully logged in.",
+		NextSteps: []string{
+			cmdutil.AgentAuthCheckCmd(),
+			cmdutil.AgentOrgListCmd(),
+		},
+	}
+	if orgSetupErr != nil {
+		resp.Status = "action_required"
+		resp.Issues = []AuthIssue{{
+			Code:        "ORG_SETUP_FAILED",
+			Message:     orgSetupErr.Error(),
+			Remediation: "Credentials were saved; run `pscale org list --format json` and `pscale org switch <org>`",
+		}}
+		resp.NextSteps = []string{
+			cmdutil.AgentOrgListCmd(),
+			cmdutil.AgentAuthCheckCmd(),
+		}
+	}
+	if err := ch.Printer.PrintJSON(resp); err != nil {
+		return err
+	}
+	if resp.Status == "action_required" {
+		return cmdutil.JSONReportedError(cmdutil.ActionRequestedExitCode)
+	}
+	return nil
+}
+
 func writeDefaultOrganizationIfNeeded(ctx context.Context, ch *cmdutil.Helper, accessToken, authURL string) error {
 	writeConfig := false
 	cfg, err := ch.ConfigFS.DefaultConfig()
@@ -139,10 +160,7 @@ func writeDefaultOrganizationIfNeeded(ctx context.Context, ch *cmdutil.Helper, a
 	}
 
 	if !writeConfig && cfg.Organization != "" {
-		hasOrg, err := hasOrg(ctx, cfg.Organization, accessToken, authURL)
-		if err != nil {
-			return err
-		}
+		hasOrg, _ := hasOrg(ctx, cfg.Organization, accessToken, authURL)
 		writeConfig = !hasOrg
 	}
 
@@ -179,9 +197,13 @@ func hasOrg(ctx context.Context, org, accessToken, authURL string) (bool, error)
 		return false, err
 	}
 
-	return slices.ContainsFunc(currentOrgs, func(o *planetscale.Organization) bool {
-		return o.Name == org
-	}), nil
+	for _, o := range currentOrgs {
+		if o.Name == org {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 func listCurrentOrgs(ctx context.Context, accessToken, authURL string) ([]*planetscale.Organization, error) {

@@ -2,6 +2,9 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 
 	"github.com/planetscale/cli/internal/cmdutil"
 )
@@ -141,7 +144,24 @@ type LoginPendingResponse struct {
 
 // LoginOKResponse is emitted after successful login.
 type LoginOKResponse struct {
-	Status    string   `json:"status"`
-	Message   string   `json:"message"`
-	NextSteps []string `json:"next_steps,omitempty"`
+	Status    string      `json:"status"`
+	Message   string      `json:"message"`
+	Issues    []AuthIssue `json:"issues,omitempty"`
+	NextSteps []string    `json:"next_steps,omitempty"`
+}
+
+func printJSONEnvelope(w io.Writer, v any) error {
+	buf, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(w, string(buf))
+	return err
+}
+
+func authCheckExitCode(resp AuthCheckResponse) error {
+	if resp.Status == "action_required" {
+		return cmdutil.JSONReportedError(cmdutil.ActionRequestedExitCode)
+	}
+	return nil
 }

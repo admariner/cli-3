@@ -37,7 +37,7 @@ pscale --org <org> database list --format json
    pscale auth check --format json
    ```
 
-   `"status": "ok"` and `"authenticated": true` means proceed. `"status": "action_required"` means log in or fix credentials (see `issues` and `next_steps` in the JSON).
+   `"status": "ok"` and `"authenticated": true` with no blocking `issues` means proceed. `"status": "action_required"` exits non-zero — log in, pick an org, or fix credentials (see `issues` and `next_steps`).
 
 2. **Login** (when not authenticated):
 
@@ -45,7 +45,7 @@ pscale --org <org> database list --format json
    pscale auth login --format json
    ```
 
-   Pending JSON has `verification_url`, `user_code`, and `browser_opened`. Open `verification_url` manually if the browser does not open. Do not retry login in a loop without browser access.
+   Pending JSON is written to **stderr** while waiting; **stdout** has a single final JSON object when login completes (`status: ok` or `action_required` if org setup fails after credentials are saved). Fields include `verification_url`, `user_code`, and `browser_opened`. Open `verification_url` manually if the browser does not open. Do not retry login in a loop without browser access.
 
 3. **Organization** — use `"organization"` from `auth check`, ask the user, or list orgs:
 

@@ -25,10 +25,7 @@ func CheckCmd(ch *cmdutil.Helper) *cobra.Command {
 				if err := ch.Printer.PrintJSON(resp); err != nil {
 					return err
 				}
-				if !resp.Authenticated {
-					return cmdutil.JSONReportedError(cmdutil.ActionRequestedExitCode)
-				}
-				return nil
+				return authCheckExitCode(resp)
 			}
 
 			if !resp.Authenticated {

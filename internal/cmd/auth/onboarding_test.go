@@ -1,10 +1,14 @@
 package auth
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/planetscale/cli/internal/cmdutil"
 	"github.com/planetscale/cli/internal/config"
+	"github.com/planetscale/cli/internal/printer"
 )
 
 func TestBuildAuthCheckResponseNoAuth(t *testing.T) {
@@ -38,5 +42,43 @@ func TestConfiguredOrganization(t *testing.T) {
 	}
 	if got := configuredOrganization(ch); got != "from-flag" {
 		t.Fatalf("org = %q", got)
+	}
+}
+
+func TestAuthCheckExitCode(t *testing.T) {
+	if err := authCheckExitCode(AuthCheckResponse{Status: "ok"}); err != nil {
+		t.Fatalf("ok status: %v", err)
+	}
+	if err := authCheckExitCode(AuthCheckResponse{Status: "action_required", Authenticated: true}); err == nil {
+		t.Fatal("expected non-zero exit for action_required")
+	}
+}
+
+func TestFinishLoginJSONOrgSetupFailure(t *testing.T) {
+	format := printer.JSON
+	var out bytes.Buffer
+	ch := &cmdutil.Helper{
+		Printer: printer.NewPrinter(&format),
+	}
+	ch.Printer.SetResourceOutput(&out)
+
+	err := finishLoginJSON(ch, errors.New("org list unavailable"))
+	if err == nil {
+		t.Fatal("expected exit error")
+	}
+	var cmdErr *cmdutil.Error
+	if !errors.As(err, &cmdErr) || !cmdErr.Handled {
+		t.Fatalf("expected handled JSON error, got %v", err)
+	}
+
+	var resp LoginOKResponse
+	if err := json.Unmarshal(out.Bytes(), &resp); err != nil {
+		t.Fatalf("stdout json: %v", err)
+	}
+	if resp.Status != "action_required" {
+		t.Fatalf("status = %q", resp.Status)
+	}
+	if len(resp.Issues) == 0 || resp.Issues[0].Code != "ORG_SETUP_FAILED" {
+		t.Fatalf("issues = %#v", resp.Issues)
 	}
 }
