@@ -286,6 +286,11 @@ func isReadQuery(query string) bool {
 	})
 }
 
+func queryReturnsRows(query string) bool {
+	upper := strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(strings.ToUpper(stripSQLGuardIgnoredText(query)))
+	return containsWord(upper, "RETURNING")
+}
+
 func queryAfterCTEs(query string) (string, bool) {
 	rest := strings.TrimSpace(query)
 	if !hasKeywordPrefix(strings.ToUpper(rest), "WITH") {
@@ -383,7 +388,7 @@ func isIdentifierChar(c byte) bool {
 }
 
 func runQuery(ctx context.Context, db *sql.DB, query string) (*queryOutcome, error) {
-	if isReadQuery(query) {
+	if isReadQuery(query) || queryReturnsRows(query) {
 		rows, err := db.QueryContext(ctx, query)
 		if err != nil {
 			return nil, err

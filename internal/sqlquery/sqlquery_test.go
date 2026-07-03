@@ -34,6 +34,28 @@ func TestIsReadQuery(t *testing.T) {
 	}
 }
 
+func TestQueryReturnsRows(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		want  bool
+	}{
+		{name: "insert returning", query: "INSERT INTO t VALUES (1) RETURNING id", want: true},
+		{name: "update returning", query: "UPDATE t SET x = 1 RETURNING id", want: true},
+		{name: "with insert returning", query: "WITH x AS (SELECT 1) INSERT INTO t VALUES (1) RETURNING id", want: true},
+		{name: "returning in string", query: "SELECT 'RETURNING id' AS sample", want: false},
+		{name: "returning in comment", query: "SELECT 1 -- RETURNING id", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := queryReturnsRows(tt.query); got != tt.want {
+				t.Fatalf("queryReturnsRows(%q) = %v, want %v", tt.query, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMySQLDSNDatabase(t *testing.T) {
 	if got := mysqlDSNDatabase(Options{}); got != "@primary" {
 		t.Fatalf("default = %q, want @primary", got)
