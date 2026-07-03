@@ -268,13 +268,118 @@ func queryPostgres(ctx context.Context, ch *cmdutil.Helper, opts Options, pgDB s
 	return runQuery(ctx, db, opts.Query)
 }
 
-var readQueryPrefixes = []string{"SELECT", "WITH", "SHOW", "DESCRIBE", "DESC", "EXPLAIN", "TABLE"}
+var readQueryPrefixes = []string{"SELECT", "SHOW", "DESCRIBE", "DESC", "EXPLAIN", "TABLE"}
 
 func isReadQuery(query string) bool {
-	q := strings.TrimSpace(strings.ToUpper(query))
+	q := strings.TrimSpace(query)
+	upper := strings.ToUpper(q)
+	if hasKeywordPrefix(upper, "WITH") {
+		afterCTEs, ok := queryAfterCTEs(q)
+		if !ok {
+			// Preserve the old behavior for unusual CTE syntax we cannot parse.
+			return true
+		}
+		return isReadQuery(afterCTEs)
+	}
 	return slices.ContainsFunc(readQueryPrefixes, func(prefix string) bool {
-		return strings.HasPrefix(q, prefix)
+		return hasKeywordPrefix(upper, prefix)
 	})
+}
+
+func queryAfterCTEs(query string) (string, bool) {
+	rest := strings.TrimSpace(query)
+	if !hasKeywordPrefix(strings.ToUpper(rest), "WITH") {
+		return rest, true
+	}
+	rest = strings.TrimSpace(rest[len("WITH"):])
+	if hasKeywordPrefix(strings.ToUpper(rest), "RECURSIVE") {
+		rest = strings.TrimSpace(rest[len("RECURSIVE"):])
+	}
+
+	for {
+		asIdx := topLevelKeywordIndex(rest, "AS")
+		if asIdx < 0 {
+			return "", false
+		}
+		rest = strings.TrimSpace(rest[asIdx+len("AS"):])
+		if !strings.HasPrefix(rest, "(") {
+			return "", false
+		}
+		end := matchingParenIndex(rest)
+		if end < 0 {
+			return "", false
+		}
+		rest = strings.TrimSpace(rest[end+1:])
+		if strings.HasPrefix(rest, ",") {
+			rest = strings.TrimSpace(rest[1:])
+			continue
+		}
+		return rest, true
+	}
+}
+
+func topLevelKeywordIndex(s, keyword string) int {
+	upper := strings.ToUpper(s)
+	depth := 0
+	for i := 0; i < len(upper); i++ {
+		switch upper[i] {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if depth == 0 && (i == 0 || !isIdentifierChar(upper[i-1])) && hasKeywordPrefix(upper[i:], keyword) {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func matchingParenIndex(s string) int {
+	depth := 0
+	quote := byte(0)
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if quote != 0 {
+			if c == quote {
+				if i+1 < len(s) && s[i+1] == quote {
+					i++
+					continue
+				}
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '\'', '"', '`':
+			quote = c
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func hasKeywordPrefix(s, keyword string) bool {
+	if !strings.HasPrefix(s, keyword) {
+		return false
+	}
+	if len(s) == len(keyword) {
+		return true
+	}
+	return !isIdentifierChar(s[len(keyword)])
+}
+
+func isIdentifierChar(c byte) bool {
+	return c == '_' || (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
 }
 
 func runQuery(ctx context.Context, db *sql.DB, query string) (*queryOutcome, error) {
