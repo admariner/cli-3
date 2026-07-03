@@ -16,6 +16,7 @@ limitations under the License.
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -182,12 +183,15 @@ func printRootOrgFlagError(format printer.Format, err error) int {
 				cmdutil.AgentDatabaseListCmd("<org>"),
 			},
 		}
-		buf, marshalErr := json.MarshalIndent(resp, "", "  ")
-		if marshalErr != nil {
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		enc.SetIndent("", "  ")
+		if marshalErr := enc.Encode(resp); marshalErr != nil {
 			fmt.Fprintf(os.Stderr, `{"error": "%s"}`, err)
 			return cmdutil.FatalErrExitCode
 		}
-		fmt.Fprintln(os.Stderr, string(buf))
+		fmt.Fprint(os.Stderr, buf.String())
 		return cmdutil.FatalErrExitCode
 	}
 

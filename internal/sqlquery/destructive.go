@@ -19,7 +19,7 @@ func (e *DestructiveQueryError) Error() string {
 // This is a best-effort guardrail for agents, not a SQL parser. Any statement
 // containing the words DELETE, DROP, or TRUNCATE requires approval.
 func IsDestructiveQuery(query string) bool {
-	return slices.ContainsFunc(splitSQLStatements(query), isDestructiveStatement)
+	return slices.ContainsFunc(splitSQLStatements(stripSQLGuardIgnoredText(query)), isDestructiveStatement)
 }
 
 func splitSQLStatements(query string) []string {
@@ -59,18 +59,38 @@ func splitSQLStatements(query string) []string {
 }
 
 func isDestructiveStatement(stmt string) bool {
-	upper := strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(strings.ToUpper(stripQuotedSQL(stmt)))
+	upper := strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(strings.ToUpper(stmt))
 	return slices.ContainsFunc(destructiveWords, func(word string) bool {
 		return containsWord(upper, word)
 	})
 }
 
-func stripQuotedSQL(stmt string) string {
+func stripSQLGuardIgnoredText(stmt string) string {
 	var out strings.Builder
 	out.Grow(len(stmt))
 	quote := byte(0)
+	lineComment := false
+	blockComment := false
 	for i := 0; i < len(stmt); i++ {
 		c := stmt[i]
+		if lineComment {
+			if c == '\n' {
+				lineComment = false
+				out.WriteByte(c)
+			} else {
+				out.WriteByte(' ')
+			}
+			continue
+		}
+		if blockComment {
+			out.WriteByte(' ')
+			if c == '*' && i+1 < len(stmt) && stmt[i+1] == '/' {
+				i++
+				out.WriteByte(' ')
+				blockComment = false
+			}
+			continue
+		}
 		if quote != 0 {
 			out.WriteByte(' ')
 			if c == '\\' && quote == '\'' && i+1 < len(stmt) {
@@ -89,6 +109,24 @@ func stripQuotedSQL(stmt string) string {
 			continue
 		}
 		switch c {
+		case '-':
+			if i+1 < len(stmt) && stmt[i+1] == '-' {
+				lineComment = true
+				out.WriteByte(' ')
+				i++
+				out.WriteByte(' ')
+			} else {
+				out.WriteByte(c)
+			}
+		case '/':
+			if i+1 < len(stmt) && stmt[i+1] == '*' {
+				blockComment = true
+				out.WriteByte(' ')
+				i++
+				out.WriteByte(' ')
+			} else {
+				out.WriteByte(c)
+			}
 		case '\'', '"', '`':
 			quote = c
 			out.WriteByte(' ')
