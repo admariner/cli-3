@@ -69,7 +69,11 @@ func ConvertSchemaParts(inputPath string) (SchemaParts, int, error) {
 			if IsORMMetadataTable(idx.Table) {
 				continue
 			}
-			indexBuf.WriteString(convertIndexDDL(idx.RawDDL))
+			ddl := convertIndexDDL(idx.RawDDL)
+			if ddl == "" {
+				continue
+			}
+			indexBuf.WriteString(ddl)
 			indexBuf.WriteString("\n")
 		}
 		indexBuf.WriteString("\n")

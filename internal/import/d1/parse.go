@@ -197,19 +197,18 @@ func parseColumn(def string) ColumnSchema {
 	return col
 }
 
-// ParseIndexes extracts CREATE INDEX statements from a SQLite dump.
-func ParseIndexes(path string) ([]IndexSchema, error) {
+// foreachDumpStatement invokes fn for each semicolon-terminated SQL statement in a dump.
+func foreachDumpStatement(path string, fn func(stmt string) error) error {
 	clean, err := ValidateInputPath(path)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	f, err := os.Open(clean)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer f.Close()
 
-	var indexes []IndexSchema
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
 
@@ -228,17 +227,30 @@ func ParseIndexes(path string) ([]IndexSchema, error) {
 		}
 		full := stmt.String()
 		stmt.Reset()
-
-		if !strings.HasPrefix(strings.ToUpper(full), "CREATE") {
-			continue
+		if err := fn(full); err != nil {
+			return err
 		}
-		upper := strings.ToUpper(full)
-		if !strings.Contains(upper, " INDEX ") {
-			continue
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("read dump: %w", err)
+	}
+	return nil
+}
+
+// ParseIndexes extracts CREATE INDEX statements from a SQLite dump.
+func ParseIndexes(path string) ([]IndexSchema, error) {
+	var indexes []IndexSchema
+	err := foreachDumpStatement(path, func(full string) error {
+		if !strings.HasPrefix(strings.ToUpper(full), "CREATE") {
+			return nil
+		}
+		if !strings.Contains(strings.ToUpper(full), " INDEX ") {
+			return nil
 		}
 		m := createIndexRe.FindStringSubmatch(full)
 		if m == nil {
-			continue
+			return nil
 		}
 		indexes = append(indexes, IndexSchema{
 			Name:    firstNonEmpty(m[2], m[3], m[4], m[5]),
@@ -247,10 +259,10 @@ func ParseIndexes(path string) ([]IndexSchema, error) {
 			Columns: m[10],
 			RawDDL:  full,
 		})
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("read dump indexes: %w", err)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return indexes, nil
 }

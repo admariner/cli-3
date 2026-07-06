@@ -12,8 +12,13 @@ var (
 	foreignKeyConstraintRe = regexp.MustCompile(`(?is)^FOREIGN\s+KEY\s*\(\s*([^)]+)\)\s*(REFERENCES\s+.+)$`)
 	primaryKeyConstraintRe = regexp.MustCompile(`(?is)^PRIMARY\s+KEY\s*\(\s*([^)]+)\)\s*$`)
 	uniqueConstraintRe     = regexp.MustCompile(`(?is)^UNIQUE\s*\(\s*([^)]+)\)\s*$`)
-	createIndexRe          = regexp.MustCompile(`(?is)^CREATE\s+(UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"([^"]+)"|'([^']+)'|` + "`" + `([^` + "`" + `]+)` + "`" + `|([a-zA-Z_][\w]*))\s+ON\s+(?:"([^"]+)"|'([^']+)'|` + "`" + `([^` + "`" + `]+)` + "`" + `|([a-zA-Z_][\w]*))\s*\(\s*([^)]+)\)\s*;?\s*$`)
+	createIndexRe          = regexp.MustCompile(`(?is)^CREATE\s+(UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"([^"]+)"|'([^']+)'|` + "`" + `([^` + "`" + `]+)` + "`" + `|([a-zA-Z_][\w]*))\s+ON\s+(?:"([^"]+)"|'([^']+)'|` + "`" + `([^` + "`" + `]+)` + "`" + `|([a-zA-Z_][\w]*))\s*\(\s*([^)]+)\)\s*(?:WHERE\b.+)?;?\s*$`)
+	partialIndexRe         = regexp.MustCompile(`(?is)\)\s+WHERE\s+`)
 )
+
+func isPartialIndexDDL(raw string) bool {
+	return partialIndexRe.MatchString(raw)
+}
 
 // IndexSchema holds a parsed CREATE INDEX statement from a dump.
 type IndexSchema struct {
@@ -171,9 +176,15 @@ func splitCommaList(list string) []string {
 }
 
 func convertIndexDDL(raw string) string {
+	if isPartialIndexDDL(raw) {
+		return ""
+	}
 	m := createIndexRe.FindStringSubmatch(raw)
 	if m == nil {
-		return raw
+		return ""
+	}
+	if indexColumnsLookExpression(m[10]) {
+		return ""
 	}
 	unique := strings.TrimSpace(m[1]) != ""
 	name := postgres.QuoteIdentifier(firstNonEmpty(m[2], m[3], m[4], m[5]))

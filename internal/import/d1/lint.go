@@ -30,6 +30,12 @@ func Lint(inputPath string) (*LintResult, error) {
 		result.Issues = append(result.Issues, lintTable(table, tables, coerceCtx)...)
 	}
 
+	ddlIssues, err := lintDumpDDL(inputPath)
+	if err != nil {
+		return nil, err
+	}
+	result.Issues = append(result.Issues, ddlIssues...)
+
 	for _, issue := range result.Issues {
 		switch issue.Severity {
 		case SeverityError:
