@@ -16,8 +16,8 @@ func (e *DestructiveQueryError) Error() string {
 }
 
 // IsDestructiveQuery reports whether the query deletes or drops resources.
-// This is a best-effort guardrail for agents, not a SQL parser. Any statement
-// containing the words DELETE, DROP, or TRUNCATE requires approval.
+// This is a best-effort guardrail for agents, not a SQL parser. Statements
+// led by DELETE, DROP, or TRUNCATE (including after CTEs) require approval.
 func IsDestructiveQuery(query string) bool {
 	return slices.ContainsFunc(splitSQLStatements(stripSQLGuardIgnoredText(query)), isDestructiveStatement)
 }
@@ -59,10 +59,86 @@ func splitSQLStatements(query string) []string {
 }
 
 func isDestructiveStatement(stmt string) bool {
-	upper := strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(strings.ToUpper(stmt))
-	return slices.ContainsFunc(destructiveWords, func(word string) bool {
-		return containsWord(upper, word)
-	})
+	return slices.ContainsFunc(splitDestructiveSegments(stmt), isDestructiveSegment)
+}
+
+func splitDestructiveSegments(stmt string) []string {
+	var out []string
+	start := 0
+	for i := 0; i < len(stmt); i++ {
+		if stmt[i] != '\n' {
+			continue
+		}
+		j := i + 1
+		for j < len(stmt) && (stmt[j] == ' ' || stmt[j] == '\t' || stmt[j] == '\r') {
+			j++
+		}
+		if j >= len(stmt) {
+			continue
+		}
+		rest := strings.ToUpper(stmt[j:])
+		if !slices.ContainsFunc(destructiveWords, func(word string) bool {
+			return hasKeywordPrefix(rest, word)
+		}) {
+			continue
+		}
+		if trimmed := strings.TrimSpace(stmt[start:i]); trimmed != "" {
+			out = append(out, trimmed)
+		}
+		start = j
+		i = j - 1
+	}
+	if trimmed := strings.TrimSpace(stmt[start:]); trimmed != "" {
+		out = append(out, trimmed)
+	}
+	if len(out) == 0 {
+		return []string{stmt}
+	}
+	return out
+}
+
+func isDestructiveSegment(stmt string) bool {
+	trimmed := strings.TrimSpace(stmt)
+	upper := strings.ToUpper(trimmed)
+
+	if hasKeywordPrefix(upper, "WITH") {
+		after, ok := queryAfterCTEs(trimmed)
+		if !ok {
+			return false
+		}
+		return isDestructiveSegment(after)
+	}
+
+	switch leadingStatementKeyword(trimmed) {
+	case "DELETE", "DROP", "TRUNCATE":
+		return true
+	case "ALTER":
+		upperNorm := strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(upper)
+		return containsWord(upperNorm, "DROP")
+	default:
+		return false
+	}
+}
+
+func leadingStatementKeyword(stmt string) string {
+	trimmed := strings.TrimSpace(stmt)
+	for i := 0; i < len(trimmed); {
+		for i < len(trimmed) && trimmed[i] <= ' ' {
+			i++
+		}
+		if i >= len(trimmed) {
+			break
+		}
+		start := i
+		for i < len(trimmed) && isIdentifierChar(trimmed[i]) {
+			i++
+		}
+		if start < i {
+			return strings.ToUpper(trimmed[start:i])
+		}
+		i++
+	}
+	return ""
 }
 
 func stripSQLGuardIgnoredText(stmt string) string {

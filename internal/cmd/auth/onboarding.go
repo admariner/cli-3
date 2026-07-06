@@ -171,6 +171,30 @@ type LoginOKResponse struct {
 	NextSteps []string    `json:"next_steps,omitempty"`
 }
 
+// LoginErrorResponse is emitted when login fails in JSON mode.
+type LoginErrorResponse struct {
+	Status    string      `json:"status"`
+	Message   string      `json:"message"`
+	Issues    []AuthIssue `json:"issues,omitempty"`
+	NextSteps []string    `json:"next_steps,omitempty"`
+}
+
+func finishLoginErrorJSON(ch *cmdutil.Helper, code, message string, err error) error {
+	resp := LoginErrorResponse{
+		Status:  "error",
+		Message: message,
+		Issues: []AuthIssue{{
+			Code:    code,
+			Message: err.Error(),
+		}},
+		NextSteps: []string{cmdutil.AgentAuthLoginCmd()},
+	}
+	if err := ch.Printer.PrintJSON(resp); err != nil {
+		return err
+	}
+	return cmdutil.JSONReportedError(cmdutil.FatalErrExitCode)
+}
+
 func printJSONEnvelope(w io.Writer, v any) error {
 	buf, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {

@@ -74,6 +74,35 @@ func TestInvalidAuthIssueAndNextStepsOAuth(t *testing.T) {
 	}
 }
 
+func TestFinishLoginErrorJSON(t *testing.T) {
+	format := printer.JSON
+	var out bytes.Buffer
+	ch := &cmdutil.Helper{
+		Printer: printer.NewPrinter(&format),
+	}
+	ch.Printer.SetResourceOutput(&out)
+
+	err := finishLoginErrorJSON(ch, "DEVICE_AUTH_FAILED", "Device authorization failed or timed out", errors.New("authorization pending"))
+	if err == nil {
+		t.Fatal("expected exit error")
+	}
+	var cmdErr *cmdutil.Error
+	if !errors.As(err, &cmdErr) || !cmdErr.Handled {
+		t.Fatalf("expected handled JSON error, got %v", err)
+	}
+
+	var resp LoginErrorResponse
+	if err := json.Unmarshal(out.Bytes(), &resp); err != nil {
+		t.Fatalf("stdout json: %v", err)
+	}
+	if resp.Status != "error" {
+		t.Fatalf("status = %q", resp.Status)
+	}
+	if len(resp.Issues) == 0 || resp.Issues[0].Code != "DEVICE_AUTH_FAILED" {
+		t.Fatalf("issues = %#v", resp.Issues)
+	}
+}
+
 func TestFinishLoginJSONOrgSetupFailure(t *testing.T) {
 	format := printer.JSON
 	var out bytes.Buffer

@@ -35,6 +35,9 @@ func LoginCmd(ch *cmdutil.Helper) *cobra.Command {
 
 			authenticator, err := psauth.New(cleanhttp.DefaultClient(), clientID, clientSecret, psauth.SetBaseURL(authURL))
 			if err != nil {
+				if jsonMode {
+					return finishLoginErrorJSON(ch, "AUTH_INIT_FAILED", "Failed to initialize login", err)
+				}
 				return err
 			}
 
@@ -42,6 +45,9 @@ func LoginCmd(ch *cmdutil.Helper) *cobra.Command {
 
 			deviceVerification, err := authenticator.VerifyDevice(ctx)
 			if err != nil {
+				if jsonMode {
+					return finishLoginErrorJSON(ch, "DEVICE_VERIFY_FAILED", "Failed to start device authorization", err)
+				}
 				return err
 			}
 
@@ -62,7 +68,6 @@ func LoginCmd(ch *cmdutil.Helper) *cobra.Command {
 				if err := printJSONEnvelope(cmd.ErrOrStderr(), pending); err != nil {
 					return err
 				}
-				fmt.Fprintln(cmd.ErrOrStderr(), "Waiting for browser authorization...")
 			} else {
 				if !browserOpened {
 					ch.Printer.Printf("Failed to open a browser; open this URL manually: %s\n", printer.Bold(deviceVerification.VerificationCompleteURL))
@@ -84,11 +89,17 @@ func LoginCmd(ch *cmdutil.Helper) *cobra.Command {
 
 			accessToken, err := authenticator.GetAccessTokenForDevice(ctx, *deviceVerification)
 			if err != nil {
+				if jsonMode {
+					return finishLoginErrorJSON(ch, "DEVICE_AUTH_FAILED", "Device authorization failed or timed out", err)
+				}
 				return err
 			}
 
 			err = config.WriteAccessToken(accessToken)
 			if err != nil {
+				if jsonMode {
+					return finishLoginErrorJSON(ch, "TOKEN_SAVE_FAILED", "Failed to save access token", err)
+				}
 				configDir, configErr := config.ConfigDir()
 				if configErr != nil {
 					ch.Printer.Printf("Error looking up configuration directory: %s\n", printer.BoldRed(configErr.Error()))

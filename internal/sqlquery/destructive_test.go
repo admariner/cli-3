@@ -38,6 +38,9 @@ func TestIsDestructiveQuery(t *testing.T) {
 		{query: "SELECT deleted_at FROM users", want: false},
 		{query: "SELECT is_deleted FROM users", want: false},
 		{query: "SELECT * FROM delete_queue", want: false},
+		{query: "SELECT drop FROM t", want: false},
+		{query: "SELECT 1 AS drop", want: false},
+		{query: "SELECT truncate FROM t", want: false},
 	}
 
 	for _, tt := range tests {
