@@ -9,11 +9,11 @@ import (
 )
 
 const (
-	HostedMCPURL       = "https://mcp.pscale.dev/mcp/planetscale"
-	MCPDocsURL         = "https://planetscale.com/docs/connect/mcp"
-	SkillsRepoURL      = "https://github.com/planetscale/skills"
-	SkillsSetupCmd     = "git clone https://github.com/planetscale/skills.git && cd skills && script/setup"
-	SkillsNPXInstall   = "npx skills add planetscale/skills -g -y"
+	HostedMCPURL        = "https://mcp.pscale.dev/mcp/planetscale"
+	MCPDocsURL          = "https://planetscale.com/docs/connect/mcp"
+	SkillsRepoURL       = "https://github.com/planetscale/skills"
+	SkillsSetupCmd      = "git clone https://github.com/planetscale/skills.git && cd skills && script/setup"
+	SkillsNPXInstall    = "npx skills add planetscale/skills -g -y"
 	SkillsCLIAutomation = "planetscale-pscale-cli-automation"
 )
 

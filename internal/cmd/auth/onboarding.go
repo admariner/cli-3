@@ -72,6 +72,10 @@ func buildAuthCheckResponse(ctx context.Context, ch *cmdutil.Helper) AuthCheckRe
 			Message:     err.Error(),
 			Remediation: "Verify API credentials and network connectivity",
 		})
+		resp.NextSteps = []string{
+			cmdutil.AgentAuthCheckCmd(),
+			cmdutil.AgentGuideCmd(),
+		}
 		return resp
 	}
 

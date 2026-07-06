@@ -133,6 +133,7 @@ func finishLoginJSON(ch *cmdutil.Helper, orgSetupErr error) error {
 	}
 	if orgSetupErr != nil {
 		resp.Status = "action_required"
+		resp.Message = "Credentials saved, but organization setup failed."
 		resp.Issues = []AuthIssue{{
 			Code:        "ORG_SETUP_FAILED",
 			Message:     orgSetupErr.Error(),

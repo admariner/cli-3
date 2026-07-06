@@ -98,6 +98,9 @@ func TestFinishLoginJSONOrgSetupFailure(t *testing.T) {
 	if resp.Status != "action_required" {
 		t.Fatalf("status = %q", resp.Status)
 	}
+	if resp.Message == "Successfully logged in." {
+		t.Fatalf("message = %q", resp.Message)
+	}
 	if len(resp.Issues) == 0 || resp.Issues[0].Code != "ORG_SETUP_FAILED" {
 		t.Fatalf("issues = %#v", resp.Issues)
 	}
