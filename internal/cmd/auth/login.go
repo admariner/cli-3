@@ -135,8 +135,6 @@ func LoginCmd(ch *cmdutil.Helper) *cobra.Command {
 
 func finishLoginJSON(ch *cmdutil.Helper, orgSetupErr error) error {
 	resp := LoginOKResponse{
-		Status:  "ok",
-		Message: "Successfully logged in.",
 		NextSteps: []string{
 			cmdutil.AgentAuthCheckCmd(),
 			cmdutil.AgentOrgListCmd(),
@@ -154,6 +152,9 @@ func finishLoginJSON(ch *cmdutil.Helper, orgSetupErr error) error {
 			cmdutil.AgentOrgListCmd(),
 			cmdutil.AgentAuthCheckCmd(),
 		}
+	} else {
+		resp.Status = "ok"
+		resp.Message = "Successfully logged in."
 	}
 	if err := ch.Printer.PrintJSON(resp); err != nil {
 		return err
