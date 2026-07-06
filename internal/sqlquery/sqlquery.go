@@ -307,6 +307,7 @@ func queryAfterCTEs(query string) (string, bool) {
 			return "", false
 		}
 		rest = strings.TrimSpace(rest[asIdx+len("AS"):])
+		rest = skipCTEMaterializedModifier(rest)
 		if !strings.HasPrefix(rest, "(") {
 			return "", false
 		}
@@ -321,6 +322,22 @@ func queryAfterCTEs(query string) (string, bool) {
 		}
 		return rest, true
 	}
+}
+
+func skipCTEMaterializedModifier(rest string) string {
+	trimmed := strings.TrimSpace(rest)
+	upper := strings.ToUpper(trimmed)
+	if hasKeywordPrefix(upper, "NOT") {
+		trimmed = strings.TrimSpace(trimmed[len("NOT"):])
+		upper = strings.ToUpper(trimmed)
+		if hasKeywordPrefix(upper, "MATERIALIZED") {
+			return strings.TrimSpace(trimmed[len("MATERIALIZED"):])
+		}
+	}
+	if hasKeywordPrefix(upper, "MATERIALIZED") {
+		return strings.TrimSpace(trimmed[len("MATERIALIZED"):])
+	}
+	return trimmed
 }
 
 func topLevelKeywordIndex(s, keyword string) int {

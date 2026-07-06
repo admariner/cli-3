@@ -43,6 +43,8 @@ func TestIsDestructiveQuery(t *testing.T) {
 		{query: "SELECT truncate FROM t", want: false},
 		{query: "MERGE INTO target USING source ON target.id = source.id WHEN MATCHED THEN DELETE", want: true},
 		{query: "MERGE INTO target USING source ON target.id = source.id WHEN NOT MATCHED THEN INSERT VALUES (1)", want: false},
+		{query: "WITH c AS MATERIALIZED (SELECT 1) DELETE FROM users", want: true},
+		{query: "WITH c AS NOT MATERIALIZED (SELECT 1) DELETE FROM users", want: true},
 	}
 
 	for _, tt := range tests {

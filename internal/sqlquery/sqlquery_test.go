@@ -23,6 +23,7 @@ func TestIsReadQuery(t *testing.T) {
 		{name: "with insert", query: "WITH x AS (SELECT 1) INSERT INTO t VALUES (1)", want: false},
 		{name: "with update", query: "WITH x AS (SELECT 1) UPDATE t SET x = 1", want: false},
 		{name: "with merge", query: "WITH x AS (SELECT 1) MERGE INTO t USING x ON t.id = x.id WHEN MATCHED THEN UPDATE SET x = 1", want: false},
+		{name: "with materialized insert", query: "WITH x AS MATERIALIZED (SELECT 1) INSERT INTO t VALUES (1)", want: false},
 	}
 
 	for _, tt := range tests {
