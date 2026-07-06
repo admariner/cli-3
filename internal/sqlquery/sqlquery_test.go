@@ -15,6 +15,9 @@ func TestIsReadQuery(t *testing.T) {
 		want  bool
 	}{
 		{name: "select", query: "SELECT 1", want: true},
+		{name: "leading line comment select", query: "-- load users\nSELECT 1", want: true},
+		{name: "leading hash comment select", query: "# load users\nSELECT 1", want: true},
+		{name: "leading block comment select", query: "/* load users */ SELECT 1", want: true},
 		{name: "with select", query: "  with x as (select 1) select * from x", want: true},
 		{name: "with multiple ctes select", query: "WITH a AS (SELECT 1), b AS (SELECT 2) SELECT * FROM b", want: true},
 		{name: "with string containing paren", query: "WITH x AS (SELECT ')' AS val) SELECT * FROM x", want: true},

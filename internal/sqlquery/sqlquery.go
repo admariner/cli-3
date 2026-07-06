@@ -271,7 +271,7 @@ func queryPostgres(ctx context.Context, ch *cmdutil.Helper, opts Options, pgDB s
 var readQueryPrefixes = []string{"SELECT", "SHOW", "DESCRIBE", "DESC", "EXPLAIN", "TABLE"}
 
 func isReadQuery(query string) bool {
-	q := strings.TrimSpace(query)
+	q := strings.TrimSpace(stripSQLGuardIgnoredText(query))
 	upper := strings.ToUpper(q)
 	if hasKeywordPrefix(upper, "WITH") {
 		afterCTEs, ok := queryAfterCTEs(q)
