@@ -144,13 +144,35 @@ func saveImportMigrationState(opts ImportOptions, phase, sqlitePath string) erro
 	if opts.Method != "" {
 		state.Method = opts.Method
 	}
-	if opts.DBName != "" {
-		state.DBName = opts.DBName
-	}
+	applyStateDBName(state, opts.DBName, false)
 	if sqlitePath != "" {
 		state.SQLitePath = sqlitePath
 	}
 	return SaveState(state)
+}
+
+// ResolveMigrationDBName returns the Postgres database name for import/verify flows.
+// When dbNameExplicit is false and migration state records db_name, that value wins over the CLI default.
+func ResolveMigrationDBName(org, database, branch, migrationID, dbName string, dbNameExplicit bool) string {
+	if !dbNameExplicit && migrationID != "" {
+		if state, err := LoadState(org, database, branch, migrationID); err == nil && state.DBName != "" {
+			dbName = state.DBName
+		}
+	}
+	if dbName == "" {
+		dbName = "postgres"
+	}
+	return dbName
+}
+
+func applyStateDBName(state *MigrationState, dbName string, dbNameExplicit bool) {
+	if dbName == "" {
+		return
+	}
+	if state.DBName != "" && !dbNameExplicit && dbName == "postgres" {
+		return
+	}
+	state.DBName = dbName
 }
 
 // Complete marks a migration as finished in local state.

@@ -64,6 +64,7 @@ func Import(ctx context.Context, psClient *ps.Client, client ImportClient, opts 
 
 	opts.MigrationID = prepared.MigrationID
 	opts.Method = prepared.Method
+	opts.DBName = ResolveMigrationDBName(opts.Org, opts.Database, opts.Branch, opts.MigrationID, opts.DBName, false)
 	if opts.InputPath == "" && prepared.Plan != nil {
 		opts.InputPath = prepared.Plan.InputPath
 	} else if opts.InputPath != "" {
@@ -499,9 +500,7 @@ func resetImportProgress(opts ImportOptions, phase, sqlitePath string) error {
 		if opts.Method != "" {
 			state.Method = opts.Method
 		}
-		if opts.DBName != "" {
-			state.DBName = opts.DBName
-		}
+		applyStateDBName(state, opts.DBName, false)
 		if sqlitePath != "" {
 			state.SQLitePath = sqlitePath
 		}

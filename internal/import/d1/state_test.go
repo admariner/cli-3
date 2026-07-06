@@ -256,3 +256,43 @@ func TestSaveImportMigrationStateFailed(t *testing.T) {
 		t.Fatalf("sqlite path = %q", state.SQLitePath)
 	}
 }
+
+func TestResolveMigrationDBNameUsesStateUnlessExplicit(t *testing.T) {
+	t.Setenv("PSCALE_TEST_MODE", "1")
+
+	org, database, branch := "acme", "mydb", "main"
+	migrationID := "dbname001"
+	if err := SavePlan(&PlanResult{
+		MigrationID: migrationID,
+		Org:         org,
+		Database:    database,
+		Branch:      branch,
+		InputPath:   testFixture(t),
+	}); err != nil {
+		t.Fatalf("SavePlan: %v", err)
+	}
+	if err := updateMigrationState(org, database, branch, migrationID, func(state *MigrationState) {
+		state.DBName = "customdb"
+	}); err != nil {
+		t.Fatalf("updateMigrationState: %v", err)
+	}
+
+	if got := ResolveMigrationDBName(org, database, branch, migrationID, "postgres", false); got != "customdb" {
+		t.Fatalf("ResolveMigrationDBName = %q, want customdb", got)
+	}
+	if got := ResolveMigrationDBName(org, database, branch, migrationID, "postgres", true); got != "postgres" {
+		t.Fatalf("explicit ResolveMigrationDBName = %q, want postgres", got)
+	}
+}
+
+func TestApplyStateDBNamePreservesSavedNonDefault(t *testing.T) {
+	state := &MigrationState{DBName: "customdb"}
+	applyStateDBName(state, "postgres", false)
+	if state.DBName != "customdb" {
+		t.Fatalf("db_name = %q, want customdb", state.DBName)
+	}
+	applyStateDBName(state, "otherdb", true)
+	if state.DBName != "otherdb" {
+		t.Fatalf("db_name = %q, want otherdb", state.DBName)
+	}
+}
