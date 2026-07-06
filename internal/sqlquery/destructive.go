@@ -115,6 +115,9 @@ func isDestructiveSegment(stmt string) bool {
 	case "ALTER":
 		upperNorm := strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(upper)
 		return containsWord(upperNorm, "DROP")
+	case "MERGE":
+		upperNorm := strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(upper)
+		return strings.Contains(" "+upperNorm+" ", " THEN DELETE ")
 	default:
 		return false
 	}
