@@ -35,6 +35,7 @@ func d1VerifyCmd(ch *cmdutil.Helper) *cobra.Command {
 				SQLitePath:  flags.sqlite,
 				DBName:      flags.dbName,
 			}
+			verifyOpts.DBName = d1.ResolveVerifyDBName(verifyOpts, cmd.Flags().Changed("dbname"))
 
 			client, err := ch.Client()
 			if err != nil {
@@ -45,7 +46,7 @@ func d1VerifyCmd(ch *cmdutil.Helper) *cobra.Command {
 				Org:      org,
 				Database: database,
 				Branch:   branch,
-				DBName:   flags.dbName,
+				DBName:   verifyOpts.DBName,
 			})
 			if err != nil {
 				return writeD1(ch, d1.ErrorResponse("verify", err))

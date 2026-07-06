@@ -59,15 +59,11 @@ func TestVerifyUsesDBNameFromState(t *testing.T) {
 		InputPath:   testFixture(t),
 		SQLitePath:  "/nonexistent/staging.sqlite",
 	}
-	// Exercise DBName resolution before sqlite count fails.
-	dbName := opts.DBName
-	if dbName == "" && opts.MigrationID != "" {
-		if state, err := LoadState(opts.Org, opts.Database, opts.Branch, opts.MigrationID); err == nil && state.DBName != "" {
-			dbName = state.DBName
-		}
+	if got := ResolveVerifyDBName(opts, false); got != "customdb" {
+		t.Fatalf("ResolveVerifyDBName = %q, want customdb", got)
 	}
-	if dbName != "customdb" {
-		t.Fatalf("resolved db_name = %q, want customdb", dbName)
+	if got := ResolveVerifyDBName(opts, true); got != "postgres" {
+		t.Fatalf("explicit ResolveVerifyDBName = %q, want postgres", got)
 	}
 }
 

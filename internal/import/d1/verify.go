@@ -46,16 +46,7 @@ func Verify(ctx context.Context, opts VerifyOptions) (result *VerifyResult, err 
 		}
 	}
 
-	dbName := opts.DBName
-	if dbName == "" && opts.MigrationID != "" {
-		if state, err := LoadState(opts.Org, opts.Database, opts.Branch, opts.MigrationID); err == nil && state.DBName != "" {
-			dbName = state.DBName
-		}
-	}
-	if dbName == "" {
-		dbName = "postgres"
-	}
-	opts.DBName = dbName
+	opts.DBName = ResolveVerifyDBName(opts, false)
 
 	opts.notifyBase = notifyPayloadFromVerify(opts)
 
@@ -293,6 +284,21 @@ func mergeImportScopedDestRowCounts(ctx context.Context, opts VerifyOptions, sou
 		destCounts[name] = count
 	}
 	return destCounts, extra, nil
+}
+
+// ResolveVerifyDBName returns the Postgres database name for verify. When dbNameExplicit
+// is false and migration state records a db_name, that value is preferred over the CLI default.
+func ResolveVerifyDBName(opts VerifyOptions, dbNameExplicit bool) string {
+	dbName := opts.DBName
+	if !dbNameExplicit && opts.MigrationID != "" {
+		if state, err := LoadState(opts.Org, opts.Database, opts.Branch, opts.MigrationID); err == nil && state.DBName != "" {
+			dbName = state.DBName
+		}
+	}
+	if dbName == "" {
+		dbName = "postgres"
+	}
+	return dbName
 }
 
 func resolveVerifySQLitePath(opts VerifyOptions) (VerifyOptions, string, error) {
