@@ -126,3 +126,5 @@ And then use the `pscale` binary built in `cmd/pscale/` for testing:
 Please checkout our Documentation page: [planetscale.com/docs](https://planetscale.com/docs/reference/planetscale-cli)
 
 For AI agents and automation, run `pscale agent-guide` or see [AGENTS.md](./AGENTS.md).
+For operational workflows (inventory, safety review, schema recommendations), install
+[planetscale/skills](https://github.com/planetscale/skills).

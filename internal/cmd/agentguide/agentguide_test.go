@@ -35,6 +35,18 @@ func TestAgentGuideJSONBootstrap(t *testing.T) {
 	if resp.HostedMCPURL != HostedMCPURL {
 		t.Fatalf("hosted MCP URL = %q", resp.HostedMCPURL)
 	}
+	if resp.SkillsRepoURL != SkillsRepoURL {
+		t.Fatalf("skills repo URL = %q", resp.SkillsRepoURL)
+	}
+	if resp.SkillsSetupCommand != SkillsSetupCmd {
+		t.Fatalf("skills setup command = %q", resp.SkillsSetupCommand)
+	}
+	if resp.SkillsCLIAutomation != SkillsCLIAutomation {
+		t.Fatalf("skills CLI automation skill = %q", resp.SkillsCLIAutomation)
+	}
+	if len(resp.NextSteps) < 2 || resp.NextSteps[1] != SkillsSetupCmd {
+		t.Fatalf("next_steps = %#v", resp.NextSteps)
+	}
 	if resp.Guide == "" {
 		t.Fatal("expected embedded guide")
 	}
