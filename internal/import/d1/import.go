@@ -19,18 +19,18 @@ import (
 
 // ImportOptions configures D1 import into PlanetScale Postgres.
 type ImportOptions struct {
-	Org         string
-	Database    string
-	Branch      string
-	InputPath   string
-	Method      string
-	MigrationID string
-	DBName      string
+	Org            string
+	Database       string
+	Branch         string
+	InputPath      string
+	Method         string
+	MigrationID    string
+	DBName         string
 	DBNameExplicit bool
-	DryRun      bool
-	DestURI     string // optional override for testing
-	NotifyAPI   NotifyAPIConfig
-	OnProgress  ImportProgressFunc
+	DryRun         bool
+	DestURI        string // optional override for testing
+	NotifyAPI      NotifyAPIConfig
+	OnProgress     ImportProgressFunc
 	// PgloaderVerbose emits full pgloader reports to stderr (defaults to false).
 	PgloaderVerbose bool
 	notifyBase      importNotificationPayload
