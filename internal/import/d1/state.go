@@ -144,7 +144,7 @@ func saveImportMigrationState(opts ImportOptions, phase, sqlitePath string) erro
 	if opts.Method != "" {
 		state.Method = opts.Method
 	}
-	applyStateDBName(state, opts.DBName, false)
+	applyStateDBName(state, opts.DBName, opts.DBNameExplicit)
 	if sqlitePath != "" {
 		state.SQLitePath = sqlitePath
 	}

@@ -26,6 +26,7 @@ type ImportOptions struct {
 	Method      string
 	MigrationID string
 	DBName      string
+	DBNameExplicit bool
 	DryRun      bool
 	DestURI     string // optional override for testing
 	NotifyAPI   NotifyAPIConfig
@@ -64,7 +65,7 @@ func Import(ctx context.Context, psClient *ps.Client, client ImportClient, opts 
 
 	opts.MigrationID = prepared.MigrationID
 	opts.Method = prepared.Method
-	opts.DBName = ResolveMigrationDBName(opts.Org, opts.Database, opts.Branch, opts.MigrationID, opts.DBName, false)
+	opts.DBName = ResolveMigrationDBName(opts.Org, opts.Database, opts.Branch, opts.MigrationID, opts.DBName, opts.DBNameExplicit)
 	if opts.InputPath == "" && prepared.Plan != nil {
 		opts.InputPath = prepared.Plan.InputPath
 	} else if opts.InputPath != "" {
@@ -500,7 +501,7 @@ func resetImportProgress(opts ImportOptions, phase, sqlitePath string) error {
 		if opts.Method != "" {
 			state.Method = opts.Method
 		}
-		applyStateDBName(state, opts.DBName, false)
+		applyStateDBName(state, opts.DBName, opts.DBNameExplicit)
 		if sqlitePath != "" {
 			state.SQLitePath = sqlitePath
 		}

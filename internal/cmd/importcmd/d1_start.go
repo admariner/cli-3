@@ -37,16 +37,16 @@ Use --dry-run to lint and save migration state without touching Postgres.`,
 			org := d1Org(ch)
 
 			importOpts := d1.ImportOptions{
-				Org:         org,
-				Database:    database,
-				Branch:      branch,
-				InputPath:   flags.input,
-				Method:      flags.method,
-				MigrationID: flags.migrationID,
-				DBName:      flags.dbName,
-				DryRun:      flags.dryRun,
+				Org:            org,
+				Database:       database,
+				Branch:         branch,
+				InputPath:      flags.input,
+				Method:         flags.method,
+				MigrationID:    flags.migrationID,
+				DBName:         flags.dbName,
+				DBNameExplicit: cmd.Flags().Changed("dbname"),
+				DryRun:         flags.dryRun,
 			}
-			importOpts.DBName = d1.ResolveMigrationDBName(org, database, branch, flags.migrationID, flags.dbName, cmd.Flags().Changed("dbname"))
 
 			prepared, err := d1.PrepareImport(importOpts)
 			if err != nil {
