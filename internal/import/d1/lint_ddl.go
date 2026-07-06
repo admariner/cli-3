@@ -150,7 +150,7 @@ func simpleIndexColumnName(name string) bool {
 	for i := 0; i < len(name); i++ {
 		c := name[i]
 		if i == 0 {
-			if c != '_' && !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+			if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && c != '_' {
 				return false
 			}
 			continue
