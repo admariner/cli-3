@@ -87,6 +87,44 @@ func TestReportConfirmationRequiredJSON(t *testing.T) {
 	}
 }
 
+func TestHandleWorkflowErrorAuthFailureJSON(t *testing.T) {
+	format := printer.JSON
+	var out bytes.Buffer
+	ch := &cmdutil.Helper{
+		Printer: printer.NewPrinter(&format),
+	}
+	ch.Printer.SetResourceOutput(&out)
+
+	ctx := errorContext{Org: "bb", Database: "mydb", Number: "1"}
+	err := ctx.handle(ch, errors.New("the access token has expired. Please run 'pscale auth login'"))
+	if err == nil {
+		t.Fatal("expected handled JSON error")
+	}
+	if cmdErr, ok := errors.AsType[*cmdutil.Error](err); !ok || !cmdErr.Handled || cmdErr.ExitCode != cmdutil.ActionRequestedExitCode {
+		t.Fatalf("expected handled action_required error, got %v", err)
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(out.Bytes(), &resp); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if resp["status"] != "action_required" {
+		t.Fatalf("status = %v", resp["status"])
+	}
+	issues, ok := resp["issues"].([]any)
+	if !ok || len(issues) == 0 {
+		t.Fatalf("issues = %v", resp["issues"])
+	}
+	issue, ok := issues[0].(map[string]any)
+	if !ok || issue["code"] != "NO_AUTH" {
+		t.Fatalf("issue = %v", issues[0])
+	}
+	nextSteps, ok := resp["next_steps"].([]any)
+	if !ok || len(nextSteps) == 0 || nextSteps[0] != cmdutil.AgentAuthLoginCmd() {
+		t.Fatalf("next_steps = %v", resp["next_steps"])
+	}
+}
+
 func TestHandleWorkflowErrorHumanModePassthrough(t *testing.T) {
 	format := printer.Human
 	ch := &cmdutil.Helper{

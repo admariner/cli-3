@@ -26,6 +26,13 @@ func (c errorContext) handle(ch *cmdutil.Helper, err error) error {
 	if cmdutil.ErrCode(err) == ps.ErrNotFound || strings.Contains(err.Error(), "does not exist") {
 		return c.report(ch, "error", "NOT_FOUND", err.Error(), c.notFoundNextSteps())
 	}
+	// Failures that are not workflow-specific (auth, network, usage) get the
+	// same code and remediation the global classifier would give on any other
+	// command, so an expired token reports NO_AUTH with login steps rather
+	// than WORKFLOW_ERROR.
+	if resp := cmdutil.GlobalJSONError(err); resp.Code != "COMMAND_FAILED" {
+		return c.report(ch, resp.Status, resp.Code, resp.Error, resp.NextSteps)
+	}
 	return c.report(ch, "error", "WORKFLOW_ERROR", err.Error(), c.defaultNextSteps())
 }
 
