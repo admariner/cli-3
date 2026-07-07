@@ -20,16 +20,17 @@ This is useful when you need to rollback a traffic switch operation.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			db, num := args[0], args[1]
+			wfCtx := errorContext{Org: ch.Config.Organization, Database: db, Number: num}
 
 			client, err := ch.Client()
 			if err != nil {
-				return err
+				return wfCtx.handle(ch, err)
 			}
 
 			var number uint64
 			number, err = strconv.ParseUint(num, 10, 64)
 			if err != nil {
-				return err
+				return wfCtx.handle(ch, err)
 			}
 
 			end := ch.Printer.PrintProgress(fmt.Sprintf("Reversing traffic for workflow %s in database %s…", printer.BoldBlue(number), printer.BoldBlue(db)))
@@ -43,10 +44,10 @@ This is useful when you need to rollback a traffic switch operation.`,
 			if err != nil {
 				switch cmdutil.ErrCode(err) {
 				case ps.ErrNotFound:
-					return fmt.Errorf("database %s or workflow %s does not exist in organization %s",
-						printer.BoldBlue(db), printer.BoldBlue(number), printer.BoldBlue(ch.Config.Organization))
+					return wfCtx.handle(ch, fmt.Errorf("database %s or workflow %s does not exist in organization %s",
+						printer.BoldBlue(db), printer.BoldBlue(number), printer.BoldBlue(ch.Config.Organization)))
 				default:
-					return cmdutil.HandleError(err)
+					return wfCtx.handle(ch, cmdutil.HandleError(err))
 				}
 			}
 			end()

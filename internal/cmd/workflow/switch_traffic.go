@@ -27,24 +27,31 @@ By default, this command will route all queries for primary, replica, and read-o
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			db, num := args[0], args[1]
+			wfCtx := errorContext{Org: ch.Config.Organization, Database: db, Number: num}
 
 			client, err := ch.Client()
 			if err != nil {
-				return err
+				return wfCtx.handle(ch, err)
 			}
 
 			var number uint64
 			number, err = strconv.ParseUint(num, 10, 64)
 			if err != nil {
-				return err
+				return wfCtx.handle(ch, err)
 			}
 
 			var workflow *ps.Workflow
 			var end func()
 
 			if !force {
-				if ch.Printer.Format() != printer.Human {
-					return fmt.Errorf(`cannot switch query traffic with the output format "%s" (run with --force to override)`, ch.Printer.Format())
+				if ch.Printer.Format() == printer.JSON {
+					retryFlags := []string{"--force"}
+					if replicasOnly {
+						retryFlags = []string{"--replicas-only", "--force"}
+					}
+					return wfCtx.reportConfirmationRequired(ch, "SWITCH_TRAFFIC_CONFIRMATION_REQUIRED",
+						"Switch traffic routes queries to the target keyspace for this workflow",
+						cmdutil.AgentWorkflowActionCmd(wfCtx.Org, db, num, "switch-traffic", retryFlags...))
 				}
 
 				if !printer.IsTTY {
@@ -97,10 +104,10 @@ By default, this command will route all queries for primary, replica, and read-o
 			if err != nil {
 				switch cmdutil.ErrCode(err) {
 				case ps.ErrNotFound:
-					return fmt.Errorf("database %s or workflow %s does not exist in organization %s",
-						printer.BoldBlue(db), printer.BoldBlue(number), printer.BoldBlue(ch.Config.Organization))
+					return wfCtx.handle(ch, fmt.Errorf("database %s or workflow %s does not exist in organization %s",
+						printer.BoldBlue(db), printer.BoldBlue(number), printer.BoldBlue(ch.Config.Organization)))
 				default:
-					return cmdutil.HandleError(err)
+					return wfCtx.handle(ch, cmdutil.HandleError(err))
 				}
 			}
 			end()

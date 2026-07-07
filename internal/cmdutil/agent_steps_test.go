@@ -16,6 +16,9 @@ func TestAgentStepsFlagOrder(t *testing.T) {
 		{name: "database list", got: AgentDatabaseListCmd("bb")},
 		{name: "branch list", got: AgentBranchListCmd("bb", "mydb")},
 		{name: "sql", got: AgentSQLCmd("bb", "mydb", "main", false)},
+		{name: "workflow list", got: AgentWorkflowListCmd("bb", "mydb")},
+		{name: "workflow create", got: AgentWorkflowCreateCmd("bb", "mydb", "main")},
+		{name: "workflow cutover", got: AgentWorkflowActionCmd("bb", "mydb", "1", "cutover", "--force")},
 	}
 
 	for _, tt := range tests {
@@ -41,8 +44,7 @@ func TestCheckAuthenticationJSONHandledError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected auth error")
 	}
-	var cmdErr *Error
-	if !errors.As(err, &cmdErr) || !cmdErr.Handled {
+	if cmdErr, ok := errors.AsType[*Error](err); !ok || !cmdErr.Handled {
 		t.Fatalf("expected handled JSON error, got %v", err)
 	}
 }

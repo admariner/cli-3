@@ -16,9 +16,7 @@ limitations under the License.
 package cmd
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -127,28 +125,26 @@ func Execute(ctx context.Context, sigc chan os.Signal, signals []os.Signal, ver,
 		return 0
 	}
 
-	var cmdErr *cmdutil.Error
-	if errors.As(err, &cmdErr) && cmdErr.Handled {
+	if cmdErr, ok := errors.AsType[*cmdutil.Error](err); ok && cmdErr.Handled {
 		if cmdErr.ExitCode != 0 {
 			return cmdErr.ExitCode
 		}
 		return cmdutil.ActionRequestedExitCode
 	}
 
-	if isRootOrgFlagError(err) {
-		return printRootOrgFlagError(format, err)
+	if format == printer.JSON {
+		return cmdutil.ReportGlobalJSONError(os.Stdout, os.Stderr, err)
 	}
 
-	// print any user specific messages first
-	switch format {
-	case printer.JSON:
-		fmt.Fprintf(os.Stderr, `{"error": "%s"}`, err)
-	default:
-		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+	if isRootOrgFlagError(err) {
+		fmt.Fprintf(os.Stderr, "Error: %s\nHint: --org belongs on resource commands, not on pscale root. Example: pscale database list --org <org> --format json\n", err)
+		return cmdutil.FatalErrExitCode
 	}
+
+	fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 
 	// check if a sub command wants to return a specific exit code
-	if errors.As(err, &cmdErr) {
+	if cmdErr, ok := errors.AsType[*cmdutil.Error](err); ok {
 		return cmdErr.ExitCode
 	}
 
@@ -160,43 +156,6 @@ func isRootOrgFlagError(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "unknown flag: --org")
-}
-
-func printRootOrgFlagError(format printer.Format, err error) int {
-	const hint = "--org belongs on resource commands, not on pscale root. Example: pscale database list --org <org> --format json"
-
-	if format == printer.JSON {
-		resp := struct {
-			Status    string   `json:"status"`
-			Code      string   `json:"code"`
-			Error     string   `json:"error"`
-			Hint      string   `json:"hint"`
-			NextSteps []string `json:"next_steps"`
-		}{
-			Status: "error",
-			Code:   "INVALID_FLAG_PLACEMENT",
-			Error:  err.Error(),
-			Hint:   hint,
-			NextSteps: []string{
-				cmdutil.AgentGuideCmd(),
-				cmdutil.AgentAuthCheckCmd(),
-				cmdutil.AgentDatabaseListCmd("<org>"),
-			},
-		}
-		var buf bytes.Buffer
-		enc := json.NewEncoder(&buf)
-		enc.SetEscapeHTML(false)
-		enc.SetIndent("", "  ")
-		if marshalErr := enc.Encode(resp); marshalErr != nil {
-			fmt.Fprintf(os.Stderr, `{"error": "%s"}`, err)
-			return cmdutil.FatalErrExitCode
-		}
-		fmt.Fprint(os.Stdout, buf.String())
-		return cmdutil.FatalErrExitCode
-	}
-
-	fmt.Fprintf(os.Stderr, "Error: %s\nHint: %s\n", err, hint)
-	return cmdutil.FatalErrExitCode
 }
 
 // runCmd adds all child commands to the root command, sets flags
