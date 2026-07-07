@@ -115,10 +115,15 @@ func GlobalJSONError(err error) JSONErrorResponse {
 		}
 
 	// Connectivity: nothing an agent can self-serve beyond retry and status.
+	// Match transport-level failures only — a bare "timeout" substring would
+	// swallow operation or deadline timeouts that deserve command-specific
+	// handling.
 	case strings.Contains(lower, "connection refused") ||
+		strings.Contains(lower, "connection reset by peer") ||
 		strings.Contains(lower, "no such host") ||
-		strings.Contains(lower, "timeout") ||
-		strings.Contains(lower, "temporary failure"):
+		strings.Contains(lower, "i/o timeout") ||
+		strings.Contains(lower, "tls handshake timeout") ||
+		strings.Contains(lower, "temporary failure in name resolution"):
 		code = "NETWORK_ERROR"
 		nextSteps = []string{
 			"Check network connectivity and --api-url, then retry",

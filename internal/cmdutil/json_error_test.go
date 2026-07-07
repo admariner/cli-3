@@ -88,9 +88,32 @@ func TestGlobalJSONErrorNotFound(t *testing.T) {
 }
 
 func TestGlobalJSONErrorNetwork(t *testing.T) {
-	resp := GlobalJSONError(errors.New("dial tcp: lookup api.planetscale.com: no such host"))
-	if resp.Code != "NETWORK_ERROR" {
-		t.Fatalf("code = %q", resp.Code)
+	networkErrors := []string{
+		"dial tcp: lookup api.planetscale.com: no such host",
+		"dial tcp 10.0.0.1:443: i/o timeout",
+		"dial tcp 10.0.0.1:443: connect: connection refused",
+		"read tcp 10.0.0.1:443: connection reset by peer",
+		"net/http: TLS handshake timeout",
+	}
+	for _, msg := range networkErrors {
+		if resp := GlobalJSONError(errors.New(msg)); resp.Code != "NETWORK_ERROR" {
+			t.Fatalf("code = %q for %q", resp.Code, msg)
+		}
+	}
+}
+
+func TestGlobalJSONErrorOperationTimeoutIsNotNetwork(t *testing.T) {
+	// Operation and deadline timeouts are not transport failures; they must
+	// fall through so command-specific handlers or the generic fallback apply.
+	operationTimeouts := []string{
+		"workflow cutover timed out waiting for traffic switch",
+		"context deadline exceeded",
+		"query timeout exceeded for SELECT",
+	}
+	for _, msg := range operationTimeouts {
+		if resp := GlobalJSONError(errors.New(msg)); resp.Code == "NETWORK_ERROR" {
+			t.Fatalf("misclassified %q as NETWORK_ERROR", msg)
+		}
 	}
 }
 
