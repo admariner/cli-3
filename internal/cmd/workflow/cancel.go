@@ -46,6 +46,10 @@ marks it as cancelled, allowing you to start a new workflow if needed.`,
 						cmdutil.AgentWorkflowActionCmd(wfCtx.Org, db, num, "cancel", "--force"))
 				}
 
+				if ch.Printer.Format() != printer.Human {
+					return fmt.Errorf(`cannot cancel workflow with the output format "%s" (run with --force to override)`, ch.Printer.Format())
+				}
+
 				if !printer.IsTTY {
 					return fmt.Errorf("cannot confirm cancellation (run with --force to override)")
 				}

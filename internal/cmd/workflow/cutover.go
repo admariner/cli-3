@@ -45,6 +45,10 @@ func CutoverCmd(ch *cmdutil.Helper) *cobra.Command {
 						cmdutil.AgentWorkflowActionCmd(wfCtx.Org, db, num, "cutover", "--force"))
 				}
 
+				if ch.Printer.Format() != printer.Human {
+					return fmt.Errorf(`cannot cutover with the output format "%s" (run with --force to override)`, ch.Printer.Format())
+				}
+
 				if !printer.IsTTY {
 					return fmt.Errorf("cannot confirm cutover (run with --force to override)")
 				}

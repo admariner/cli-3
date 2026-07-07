@@ -54,6 +54,10 @@ By default, this command will route all queries for primary, replica, and read-o
 						cmdutil.AgentWorkflowActionCmd(wfCtx.Org, db, num, "switch-traffic", retryFlags...))
 				}
 
+				if ch.Printer.Format() != printer.Human {
+					return fmt.Errorf(`cannot switch query traffic with the output format "%s" (run with --force to override)`, ch.Printer.Format())
+				}
+
 				if !printer.IsTTY {
 					return fmt.Errorf("cannot confirm switching query traffic (run with --force to override)")
 				}
