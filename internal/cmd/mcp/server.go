@@ -170,9 +170,10 @@ func getToolDefinitions() []ToolDef {
 // ServerCmd returns a new cobra.Command for the mcp server command.
 func ServerCmd(ch *cmdutil.Helper) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "server",
-		Short: "Start the MCP server",
-		Long:  `Start the PlanetScale model context protocol (MCP) server.`,
+		Use:        "server",
+		Short:      "Start the deprecated local MCP server",
+		Long:       `Start the deprecated local PlanetScale model context protocol (MCP) server.`,
+		Deprecated: "use the hosted PlanetScale MCP server: https://planetscale.com/docs/connect/mcp\n",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Create a new MCP server
 			s := server.NewMCPServer(

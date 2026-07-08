@@ -122,14 +122,9 @@ second argument:
 				}
 			}
 
-			role := cmdutil.AdministratorRole
-			if flags.role != "" {
-				role, err = cmdutil.RoleFromString(flags.role)
-				if err != nil {
-					return err
-				}
-			} else if flags.replica {
-				role = cmdutil.ReaderRole
+			role, err := cmdutil.ResolveAccessRole(flags.role, flags.replica, cmdutil.AdministratorRole)
+			if err != nil {
+				return err
 			}
 
 			// check whether database and branch exist
@@ -316,23 +311,7 @@ func startShellForPostgres(ctx context.Context, ch *cmdutil.Helper, client *ps.C
 	}
 
 	// Map role flags to Postgres role inheritance
-	var inheritedRoles []string
-	var successor string
-
-	switch role {
-	case cmdutil.ReaderRole:
-		inheritedRoles = []string{"pg_read_all_data"}
-	case cmdutil.WriterRole:
-		inheritedRoles = []string{"pg_write_all_data"}
-	case cmdutil.ReadWriterRole:
-		inheritedRoles = []string{"pg_read_all_data", "pg_write_all_data"}
-	case cmdutil.AdministratorRole:
-		inheritedRoles = []string{"postgres"}
-		successor = "postgres"
-	default:
-		// Default to empty array for unknown roles
-		inheritedRoles = []string{}
-	}
+	inheritedRoles, successor := cmdutil.PostgresInheritedRoles(role)
 
 	// Create a temporary role for Postgres
 	pgRole, err := roleutil.New(ctx, client, roleutil.Options{

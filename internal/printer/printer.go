@@ -270,12 +270,15 @@ func (p *Printer) PrintJSON(v interface{}) error {
 		out = p.resourceOut
 	}
 
-	buf, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(v); err != nil {
 		return err
 	}
 
-	fmt.Fprintln(out, string(buf))
+	fmt.Fprint(out, buf.String())
 	return nil
 }
 

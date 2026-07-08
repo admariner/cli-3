@@ -66,7 +66,7 @@ func d1CommandError(resp d1.Response) error {
 	return &cmdutil.Error{
 		Msg:      msg,
 		ExitCode: cmdutil.ActionRequestedExitCode,
-		Printed:  true,
+		Handled:  true,
 	}
 }
 

@@ -124,8 +124,8 @@ func TestWriteD1ErrorUsesConsistentExitCode(t *testing.T) {
 			if cmdErr.ExitCode != cmdutil.ActionRequestedExitCode {
 				t.Fatalf("exit code = %d, want %d", cmdErr.ExitCode, cmdutil.ActionRequestedExitCode)
 			}
-			if !cmdErr.Printed {
-				t.Fatal("expected output to be marked printed")
+			if !cmdErr.Handled {
+				t.Fatal("expected output to be marked handled")
 			}
 			if buf.Len() == 0 {
 				t.Fatal("expected response output")

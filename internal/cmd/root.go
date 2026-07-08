@@ -16,7 +16,9 @@ limitations under the License.
 package cmd
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -25,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/planetscale/cli/internal/cmd/agentguide"
 	"github.com/planetscale/cli/internal/cmd/mcp"
 	"github.com/planetscale/cli/internal/cmd/role"
 	"github.com/planetscale/cli/internal/cmd/size"
@@ -49,6 +52,7 @@ import (
 	"github.com/planetscale/cli/internal/cmd/region"
 	"github.com/planetscale/cli/internal/cmd/shell"
 	"github.com/planetscale/cli/internal/cmd/signup"
+	"github.com/planetscale/cli/internal/cmd/sql"
 	"github.com/planetscale/cli/internal/cmd/token"
 	"github.com/planetscale/cli/internal/cmd/version"
 	"github.com/planetscale/cli/internal/cmd/webhook"
@@ -71,9 +75,14 @@ var (
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:              "pscale",
-	Short:            "A CLI for PlanetScale",
-	Long:             `pscale is a CLI library for communicating with PlanetScale's API.`,
+	Use:   "pscale",
+	Short: "A CLI for PlanetScale",
+	Long: `pscale is a CLI for communicating with PlanetScale's API.
+
+Agents and automation should start with:
+
+  pscale agent-guide --format json
+  pscale auth check --format json`,
 	TraverseChildren: true,
 }
 
@@ -120,20 +129,74 @@ func Execute(ctx context.Context, sigc chan os.Signal, signals []os.Signal, ver,
 	}
 
 	var cmdErr *cmdutil.Error
-	printed := errors.As(err, &cmdErr) && cmdErr.Printed
-	if !printed {
-		switch format {
-		case printer.JSON:
-			fmt.Fprintf(os.Stderr, `{"error": "%s"}`, err)
-		default:
-			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+	if errors.As(err, &cmdErr) && cmdErr.Handled {
+		if cmdErr.ExitCode != 0 {
+			return cmdErr.ExitCode
 		}
+		return cmdutil.ActionRequestedExitCode
 	}
 
+	if isRootOrgFlagError(err) {
+		return printRootOrgFlagError(format, err)
+	}
+
+	// print any user specific messages first
+	switch format {
+	case printer.JSON:
+		fmt.Fprintf(os.Stderr, `{"error": "%s"}`, err)
+	default:
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+	}
+
+	// check if a sub command wants to return a specific exit code
 	if errors.As(err, &cmdErr) {
 		return cmdErr.ExitCode
 	}
 
+	return cmdutil.FatalErrExitCode
+}
+
+func isRootOrgFlagError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "unknown flag: --org")
+}
+
+func printRootOrgFlagError(format printer.Format, err error) int {
+	const hint = "--org belongs on resource commands, not on pscale root. Example: pscale database list --org <org> --format json"
+
+	if format == printer.JSON {
+		resp := struct {
+			Status    string   `json:"status"`
+			Code      string   `json:"code"`
+			Error     string   `json:"error"`
+			Hint      string   `json:"hint"`
+			NextSteps []string `json:"next_steps"`
+		}{
+			Status: "error",
+			Code:   "INVALID_FLAG_PLACEMENT",
+			Error:  err.Error(),
+			Hint:   hint,
+			NextSteps: []string{
+				cmdutil.AgentGuideCmd(),
+				cmdutil.AgentAuthCheckCmd(),
+				cmdutil.AgentDatabaseListCmd("<org>"),
+			},
+		}
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		enc.SetIndent("", "  ")
+		if marshalErr := enc.Encode(resp); marshalErr != nil {
+			fmt.Fprintf(os.Stderr, `{"error": "%s"}`, err)
+			return cmdutil.FatalErrExitCode
+		}
+		fmt.Fprint(os.Stdout, buf.String())
+		return cmdutil.FatalErrExitCode
+	}
+
+	fmt.Fprintf(os.Stderr, "Error: %s\nHint: %s\n", err, hint)
 	return cmdutil.FatalErrExitCode
 }
 
@@ -210,9 +273,9 @@ func runCmd(ctx context.Context, ver, commit, buildDate string, format *printer.
 	rootCmd.PersistentFlags().Lookup("api-token").DefValue = ""
 
 	// Add command groups for better organization
-	rootCmd.AddGroup(&cobra.Group{ID: "database", Title: printer.Bold("General database commands:")})
-	rootCmd.AddGroup(&cobra.Group{ID: "vitess", Title: printer.Bold("Vitess-specific commands:")})
-	rootCmd.AddGroup(&cobra.Group{ID: "postgres", Title: printer.Bold("Postgres-specific commands:")})
+	rootCmd.AddGroup(&cobra.Group{ID: "database", Title: printer.Bold("MySQL & PostgreSQL database commands:")})
+	rootCmd.AddGroup(&cobra.Group{ID: "vitess", Title: printer.Bold("Vitess/MySQL-specific commands:")})
+	rootCmd.AddGroup(&cobra.Group{ID: "postgres", Title: printer.Bold("PostgreSQL-specific commands:")})
 	rootCmd.AddGroup(&cobra.Group{ID: "platform", Title: printer.Bold("Platform & account management:")})
 
 	loginCmd := auth.LoginCmd(ch)
@@ -224,6 +287,10 @@ func runCmd(ctx context.Context, ver, commit, buildDate string, format *printer.
 	rootCmd.AddCommand(logoutCmd)
 
 	// Platform & Account Management commands
+	agentGuideCmd := agentguide.AgentGuideCmd(ch)
+	agentGuideCmd.GroupID = "platform"
+	rootCmd.AddCommand(agentGuideCmd)
+
 	apiCmd := api.ApiCmd(ch, userAgent, headers)
 	apiCmd.GroupID = "platform"
 	rootCmd.AddCommand(apiCmd)
@@ -317,6 +384,10 @@ func runCmd(ctx context.Context, ver, commit, buildDate string, format *printer.
 	importCmd := importcmd.ImportCmd(ch)
 	importCmd.GroupID = "postgres"
 	rootCmd.AddCommand(importCmd)
+
+	sqlCmd := sql.SQLCmd(ch)
+	sqlCmd.GroupID = "database"
+	rootCmd.AddCommand(sqlCmd)
 
 	workflowCmd := workflow.WorkflowCmd(ch)
 	workflowCmd.GroupID = "vitess"

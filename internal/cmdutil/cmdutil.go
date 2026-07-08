@@ -2,6 +2,7 @@ package cmdutil
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -69,6 +70,35 @@ func RoleFromString(r string) (PasswordRole, error) {
 	return 0, fmt.Errorf("invalid role [%v] requested", r)
 }
 
+// ResolveAccessRole picks the credential access level from --role and --replica,
+// using defaultRole when neither is set (shell uses AdministratorRole; sql uses ReaderRole).
+func ResolveAccessRole(roleFlag string, replica bool, defaultRole PasswordRole) (PasswordRole, error) {
+	if roleFlag != "" {
+		return RoleFromString(roleFlag)
+	}
+	if replica {
+		return ReaderRole, nil
+	}
+	return defaultRole, nil
+}
+
+// PostgresInheritedRoles maps --role to Postgres inherited roles (used by shell and sql).
+// MySQL/Vitess uses branch passwords via passwordutil instead — same --role flag, different API.
+func PostgresInheritedRoles(role PasswordRole) (inherited []string, successor string) {
+	switch role {
+	case ReaderRole:
+		return []string{"pg_read_all_data"}, ""
+	case WriterRole:
+		return []string{"pg_write_all_data"}, ""
+	case ReadWriterRole:
+		return []string{"pg_read_all_data", "pg_write_all_data"}, ""
+	case AdministratorRole:
+		return []string{"postgres"}, "postgres"
+	default:
+		return nil, ""
+	}
+}
+
 // Helper is passed to every single command and is used by individual
 // subcommands.
 type Helper struct {
@@ -117,11 +147,52 @@ func RequiredArgs(reqArgs ...string) cobra.PositionalArgs {
 func CheckAuthentication(cfg *config.Config) func(cmd *cobra.Command, args []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		if err := cfg.IsAuthenticated(); err != nil {
+			if commandFormat(cmd) == printer.JSON.String() {
+				resp := struct {
+					Status            string              `json:"status"`
+					Authenticated     bool                `json:"authenticated"`
+					Code              string              `json:"code"`
+					Error             string              `json:"error"`
+					AgentGuideCommand string              `json:"agent_guide_command"`
+					Issues            []map[string]string `json:"issues"`
+					NextSteps         []string            `json:"next_steps"`
+				}{
+					Status:            "action_required",
+					Authenticated:     false,
+					Code:              "NO_AUTH",
+					Error:             err.Error(),
+					AgentGuideCommand: AgentGuideCmd(),
+					Issues: []map[string]string{
+						{
+							"code":        "NO_AUTH",
+							"message":     err.Error(),
+							"remediation": "Run `pscale auth login --format json`",
+						},
+					},
+					NextSteps: []string{
+						AgentAuthLoginCmd(),
+						AgentAuthCheckCmd(),
+					},
+				}
+				buf, marshalErr := json.MarshalIndent(resp, "", "  ")
+				if marshalErr != nil {
+					return marshalErr
+				}
+				fmt.Fprintln(os.Stdout, string(buf))
+				return JSONReportedError(ActionRequestedExitCode)
+			}
 			return fmt.Errorf("%s\nError: %s", WarnAuthMessage, err.Error())
 		}
 
 		return nil
 	}
+}
+
+func commandFormat(cmd *cobra.Command) string {
+	if flag := cmd.Flag("format"); flag != nil {
+		return flag.Value.String()
+	}
+	return printer.Human.String()
 }
 
 // NewZapLogger returns a logger to be used with the sql-proxy. By default it

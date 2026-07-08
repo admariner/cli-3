@@ -4,19 +4,12 @@ import (
 	"os"
 	"strings"
 
-	"github.com/planetscale/cli/internal/printer"
-
 	exec "golang.org/x/sys/execabs"
 )
 
 const ApplicationURL = "https://app.planetscale.com"
 
-// OpenBrowser opens a web browser at the specified url.
-func OpenBrowser(goos, url string) *exec.Cmd {
-	if !printer.IsTTY {
-		panic("OpenBrowser called without a TTY")
-	}
-
+func browserCommand(goos, url string) *exec.Cmd {
 	exe := "open"
 	var args []string
 	switch goos {
@@ -34,6 +27,12 @@ func OpenBrowser(goos, url string) *exec.Cmd {
 	cmd := exec.Command(exe, args...)
 	cmd.Stderr = os.Stderr
 	return cmd
+}
+
+// TryOpenBrowser opens the default web browser at url. It does not require a TTY.
+// Callers should print the URL when this returns an error (headless CI, SSH, etc.).
+func TryOpenBrowser(goos, url string) error {
+	return browserCommand(goos, url).Run()
 }
 
 func linuxExe() string {

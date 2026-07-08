@@ -20,12 +20,16 @@ type Error struct {
 	Msg string
 	// ExitCode is returned to the shell when the command fails.
 	ExitCode int
-	// Printed indicates the error output was already written (e.g. to stdout);
-	// root should not print Msg to stderr again.
-	Printed bool
+	// Handled suppresses Execute's stderr message when JSON was already printed to stdout.
+	Handled bool
 }
 
 func (e *Error) Error() string { return e.Msg }
+
+// JSONReportedError returns an exit error after structured JSON was written to stdout.
+func JSONReportedError(exitCode int) *Error {
+	return &Error{ExitCode: exitCode, Handled: true}
+}
 
 // ErrCode returns the code from a *planetscale.Error, if available. If the
 // error is not of type *planetscale.Error or is nil, it returns an empty,

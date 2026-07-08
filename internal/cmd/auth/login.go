@@ -7,7 +7,7 @@ import (
 	"runtime"
 
 	"github.com/hashicorp/go-cleanhttp"
-	"github.com/planetscale/cli/internal/auth"
+	psauth "github.com/planetscale/cli/internal/auth"
 	"github.com/planetscale/cli/internal/cmdutil"
 	"github.com/planetscale/cli/internal/config"
 	"github.com/planetscale/cli/internal/printer"
@@ -28,12 +28,16 @@ func LoginCmd(ch *cmdutil.Helper) *cobra.Command {
 		Args:  cobra.ExactArgs(0),
 		Short: "Authenticate with the PlanetScale API",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !printer.IsTTY {
-				return errors.New("the 'login' command requires an interactive shell")
+			jsonMode := ch.Printer.Format() == printer.JSON
+			if !jsonMode && !printer.IsTTY {
+				return errors.New("the 'login' command requires an interactive shell (use --format json; browser opens when possible, then polls until approved)")
 			}
 
-			authenticator, err := auth.New(cleanhttp.DefaultClient(), clientID, clientSecret, auth.SetBaseURL(authURL))
+			authenticator, err := psauth.New(cleanhttp.DefaultClient(), clientID, clientSecret, psauth.SetBaseURL(authURL))
 			if err != nil {
+				if jsonMode {
+					return finishLoginErrorJSON(ch, "AUTH_INIT_FAILED", "Failed to initialize login", err)
+				}
 				return err
 			}
 
@@ -41,31 +45,61 @@ func LoginCmd(ch *cmdutil.Helper) *cobra.Command {
 
 			deviceVerification, err := authenticator.VerifyDevice(ctx)
 			if err != nil {
+				if jsonMode {
+					return finishLoginErrorJSON(ch, "DEVICE_VERIFY_FAILED", "Failed to start device authorization", err)
+				}
 				return err
 			}
 
-			openCmd := cmdutil.OpenBrowser(runtime.GOOS, deviceVerification.VerificationCompleteURL)
-			err = openCmd.Run()
-			if err != nil {
-				ch.Printer.Printf("Failed to open a browser: %s\n", printer.BoldRed(err.Error()))
+			browserOpened := cmdutil.TryOpenBrowser(runtime.GOOS, deviceVerification.VerificationCompleteURL) == nil
+
+			if jsonMode {
+				pending := LoginPendingResponse{
+					Status:          "pending",
+					VerificationURL: deviceVerification.VerificationCompleteURL,
+					UserCode:        deviceVerification.UserCode,
+					BrowserOpened:   browserOpened,
+					Message:         loginPendingMessage(browserOpened),
+					NextSteps: []string{
+						"Approve access in the browser",
+						cmdutil.AgentAuthCheckCmd(),
+					},
+				}
+				if err := printJSONEnvelope(cmd.ErrOrStderr(), pending); err != nil {
+					return err
+				}
+			} else {
+				if !browserOpened {
+					ch.Printer.Printf("Failed to open a browser; open this URL manually: %s\n", printer.Bold(deviceVerification.VerificationCompleteURL))
+				}
+
+				bold := color.New(color.Bold)
+				bold.Printf("\nConfirmation Code: ")
+				boldGreen := bold.Add(color.FgGreen)
+				boldGreen.Fprintln(color.Output, deviceVerification.UserCode)
+
+				ch.Printer.Printf("\nIf something goes wrong, copy and paste this URL into your browser: %s\n\n", printer.Bold(deviceVerification.VerificationCompleteURL))
 			}
 
-			bold := color.New(color.Bold)
-			bold.Printf("\nConfirmation Code: ")
-			boldGreen := bold.Add(color.FgGreen)
-			boldGreen.Fprintln(color.Output, deviceVerification.UserCode)
+			var end func()
+			if !jsonMode {
+				end = ch.Printer.PrintProgress("Waiting for confirmation...")
+				defer end()
+			}
 
-			ch.Printer.Printf("\nIf something goes wrong, copy and paste this URL into your browser: %s\n\n", printer.Bold(deviceVerification.VerificationCompleteURL))
-
-			end := ch.Printer.PrintProgress("Waiting for confirmation...")
-			defer end()
 			accessToken, err := authenticator.GetAccessTokenForDevice(ctx, *deviceVerification)
 			if err != nil {
+				if jsonMode {
+					return finishLoginErrorJSON(ch, "DEVICE_AUTH_FAILED", "Device authorization failed or timed out", err)
+				}
 				return err
 			}
 
 			err = config.WriteAccessToken(accessToken)
 			if err != nil {
+				if jsonMode {
+					return finishLoginErrorJSON(ch, "TOKEN_SAVE_FAILED", "Failed to save access token", err)
+				}
 				configDir, configErr := config.ConfigDir()
 				if configErr != nil {
 					ch.Printer.Printf("Error looking up configuration directory: %s\n", printer.BoldRed(configErr.Error()))
@@ -73,38 +107,80 @@ func LoginCmd(ch *cmdutil.Helper) *cobra.Command {
 				return fmt.Errorf("error logging in: %w\n\nPlease ensure you have write permissions to the configuration directory: %s", err, configDir)
 			}
 
-			// We explicitly stop here so we can replace the spinner with our success
-			// message.
-			end()
+			if end != nil {
+				end()
+			}
+
+			orgSetupErr := writeDefaultOrganizationIfNeeded(ctx, ch, accessToken, authURL)
+
+			if jsonMode {
+				return finishLoginJSON(ch, orgSetupErr)
+			}
+
+			if orgSetupErr != nil {
+				return orgSetupErr
+			}
+
 			ch.Printer.Println("Successfully logged in.")
-
-			writeConfig := false
-			cfg, err := ch.ConfigFS.DefaultConfig()
-			if err != nil {
-				writeConfig = true
-			}
-
-			if !writeConfig && cfg.Organization != "" {
-				hasOrg, _ := hasOrg(ctx, cfg.Organization, accessToken, authURL)
-				writeConfig = !hasOrg
-			}
-
-			if writeConfig || cfg.Organization == "" {
-				err = writeDefaultOrganization(ctx, accessToken, authURL)
-				if err != nil {
-					return err
-				}
-			}
-
 			return nil
 		},
 	}
 
-	cmd.Flags().StringVar(&clientID, "client-id", auth.OAuthClientID, "The client ID for the PlanetScale CLI application.")
-	cmd.Flags().StringVar(&clientSecret, "client-secret", auth.OAuthClientSecret, "The client ID for the PlanetScale CLI application")
-	cmd.Flags().StringVar(&authURL, "api-url", auth.DefaultBaseURL, "The PlanetScale Auth API base URL.")
+	cmd.Flags().StringVar(&clientID, "client-id", psauth.OAuthClientID, "The client ID for the PlanetScale CLI application.")
+	cmd.Flags().StringVar(&clientSecret, "client-secret", psauth.OAuthClientSecret, "The client ID for the PlanetScale CLI application")
+	cmd.Flags().StringVar(&authURL, "api-url", psauth.DefaultBaseURL, "The PlanetScale Auth API base URL.")
 
 	return cmd
+}
+
+func finishLoginJSON(ch *cmdutil.Helper, orgSetupErr error) error {
+	resp := LoginOKResponse{
+		NextSteps: []string{
+			cmdutil.AgentAuthCheckCmd(),
+			cmdutil.AgentOrgListCmd(),
+		},
+	}
+	if orgSetupErr != nil {
+		resp.Status = "action_required"
+		resp.Message = "Credentials saved, but organization setup failed."
+		resp.Issues = []AuthIssue{{
+			Code:        "ORG_SETUP_FAILED",
+			Message:     orgSetupErr.Error(),
+			Remediation: "Credentials were saved; run `pscale org list --format json` and `pscale org switch <org>`",
+		}}
+		resp.NextSteps = []string{
+			cmdutil.AgentOrgListCmd(),
+			cmdutil.AgentAuthCheckCmd(),
+		}
+	} else {
+		resp.Status = "ok"
+		resp.Message = "Successfully logged in."
+	}
+	if err := ch.Printer.PrintJSON(resp); err != nil {
+		return err
+	}
+	if resp.Status == "action_required" {
+		return cmdutil.JSONReportedError(cmdutil.ActionRequestedExitCode)
+	}
+	return nil
+}
+
+func writeDefaultOrganizationIfNeeded(ctx context.Context, ch *cmdutil.Helper, accessToken, authURL string) error {
+	writeConfig := false
+	cfg, err := ch.ConfigFS.DefaultConfig()
+	if err != nil {
+		writeConfig = true
+	}
+
+	if !writeConfig && cfg.Organization != "" {
+		hasOrg, _ := hasOrg(ctx, cfg.Organization, accessToken, authURL)
+		writeConfig = !hasOrg
+	}
+
+	if writeConfig || cfg.Organization == "" {
+		return writeDefaultOrganization(ctx, accessToken, authURL)
+	}
+	return nil
 }
 
 func writeDefaultOrganization(ctx context.Context, accessToken, authURL string) error {
@@ -158,5 +234,4 @@ func listCurrentOrgs(ctx context.Context, accessToken, authURL string) ([]*plane
 	}
 
 	return orgs, nil
-
 }
