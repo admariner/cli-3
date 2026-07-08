@@ -13,7 +13,6 @@ func d1VerifyCmd(ch *cmdutil.Helper) *cobra.Command {
 		input       string
 		sqlite      string
 		dbName      string
-		noNotify    bool
 	}
 
 	cmd := &cobra.Command{
@@ -41,7 +40,7 @@ func d1VerifyCmd(ch *cmdutil.Helper) *cobra.Command {
 			if err != nil {
 				return writeD1(ch, d1.ErrorResponse("verify", err))
 			}
-			verifyOpts.NotifyAPI = d1NotifyAPI(client, flags.noNotify)
+			verifyOpts.NotifyAPI = d1NotifyAPI(client)
 			destURI, cleanup, err := d1.ResolveDestURI(cmd.Context(), client, d1.ImportOptions{
 				Org:      org,
 				Database: database,
@@ -77,7 +76,6 @@ func d1VerifyCmd(ch *cmdutil.Helper) *cobra.Command {
 	cmd.Flags().StringVar(&flags.input, "input", "", "Path to original D1 SQL export")
 	cmd.Flags().StringVar(&flags.sqlite, "sqlite", "", "Path to local SQLite file for source counts")
 	cmd.Flags().StringVar(&flags.dbName, "dbname", "postgres", "Destination PostgreSQL database name")
-	cmd.Flags().BoolVar(&flags.noNotify, "no-notify", false, "Skip Slack notifications for this verification")
 	cmd.MarkFlagRequired("migration-id")
 	return cmd
 }

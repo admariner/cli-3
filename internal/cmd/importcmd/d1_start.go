@@ -16,7 +16,6 @@ func d1StartCmd(ch *cmdutil.Helper) *cobra.Command {
 		dbName      string
 		dryRun      bool
 		force       bool
-		noNotify    bool
 	}
 
 	cmd := &cobra.Command{
@@ -68,7 +67,7 @@ Use --dry-run to lint and save migration state without touching Postgres.`,
 			if err != nil {
 				return writeD1(ch, d1.ErrorResponse("start", err))
 			}
-			importOpts.NotifyAPI = d1NotifyAPI(client, flags.noNotify)
+			importOpts.NotifyAPI = d1NotifyAPI(client)
 
 			var progress *progressReporter
 			if !flags.dryRun {
@@ -114,7 +113,6 @@ Use --dry-run to lint and save migration state without touching Postgres.`,
 	cmd.Flags().StringVar(&flags.dbName, "dbname", "postgres", "Destination PostgreSQL database name")
 	cmd.Flags().BoolVar(&flags.dryRun, "dry-run", false, "Lint and build import plan without loading Postgres")
 	cmd.Flags().BoolVar(&flags.force, "force", false, "Skip confirmation prompt")
-	cmd.Flags().BoolVar(&flags.noNotify, "no-notify", false, "Skip Slack notifications for this import")
 	cmd.MarkFlagRequired("input")
 	return cmd
 }

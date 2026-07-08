@@ -12,7 +12,6 @@ func d1CompleteCmd(ch *cmdutil.Helper) *cobra.Command {
 	var flags struct {
 		migrationID string
 		force       bool
-		noNotify    bool
 	}
 
 	cmd := &cobra.Command{
@@ -37,7 +36,7 @@ func d1CompleteCmd(ch *cmdutil.Helper) *cobra.Command {
 			if err != nil {
 				return writeD1(ch, d1.ErrorResponse("complete", err))
 			}
-			if err := d1.Complete(d1Org(ch), database, branch, flags.migrationID, d1NotifyAPI(client, flags.noNotify)); err != nil {
+			if err := d1.Complete(d1Org(ch), database, branch, flags.migrationID, d1NotifyAPI(client)); err != nil {
 				return writeD1(ch, d1.ErrorResponse("complete", err))
 			}
 			return writeD1(ch, resp)
@@ -46,7 +45,6 @@ func d1CompleteCmd(ch *cmdutil.Helper) *cobra.Command {
 
 	cmd.Flags().StringVar(&flags.migrationID, "migration-id", "", "Migration ID")
 	cmd.Flags().BoolVar(&flags.force, "force", false, "Skip confirmation prompt")
-	cmd.Flags().BoolVar(&flags.noNotify, "no-notify", false, "Skip Slack notifications for this completion")
 	cmd.MarkFlagRequired("migration-id")
 	return cmd
 }

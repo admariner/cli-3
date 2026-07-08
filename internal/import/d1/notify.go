@@ -27,7 +27,7 @@ const (
 // NotifyAPIConfig carries the PlanetScale API client for async D1 import notifications.
 type NotifyAPIConfig struct {
 	Client *ps.Client
-	// Disabled skips notifications (--no-notify).
+	// Disabled skips notifications (internal use and tests).
 	Disabled bool
 }
 

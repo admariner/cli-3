@@ -70,8 +70,8 @@ func d1CommandError(resp d1.Response) error {
 	}
 }
 
-func d1NotifyAPI(client *ps.Client, disabled bool) d1.NotifyAPIConfig {
-	return d1.NotifyAPIConfig{Client: client, Disabled: disabled}
+func d1NotifyAPI(client *ps.Client) d1.NotifyAPIConfig {
+	return d1.NotifyAPIConfig{Client: client}
 }
 
 func importTableCount(prepared *d1.ImportPrepareResult) int {
