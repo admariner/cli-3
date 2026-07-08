@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 	"github.com/spf13/cobra"
 )
 

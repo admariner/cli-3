@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 )
 
 type MoveTablesService struct {

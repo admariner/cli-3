@@ -10,7 +10,7 @@ import (
 	"github.com/pkg/browser"
 	"github.com/planetscale/cli/internal/cmdutil"
 	"github.com/planetscale/cli/internal/printer"
-	"github.com/planetscale/planetscale-go/planetscale"
+	"github.com/planetscale/cli/internal/planetscale"
 
 	"github.com/spf13/cobra"
 )

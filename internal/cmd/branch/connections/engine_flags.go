@@ -3,7 +3,7 @@ package connections
 import (
 	"errors"
 
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 )
 
 // ValidateEngineFlags rejects flags that only apply to another database engine.

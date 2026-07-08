@@ -16,7 +16,7 @@ import (
 	"github.com/planetscale/cli/internal/config"
 	"github.com/planetscale/cli/internal/printer"
 
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"

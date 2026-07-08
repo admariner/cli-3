@@ -12,7 +12,7 @@ import (
 	"github.com/planetscale/cli/internal/cmdutil"
 	"github.com/planetscale/cli/internal/config"
 	"github.com/planetscale/cli/internal/printer"
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 )
 
 func processlistTestHelper(org, baseURL string, format printer.Format, buf *bytes.Buffer) *cmdutil.Helper {

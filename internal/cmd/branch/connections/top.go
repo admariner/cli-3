@@ -17,7 +17,7 @@ import (
 	"github.com/planetscale/cli/internal/connections/tui"
 	"github.com/planetscale/cli/internal/printer"
 	"github.com/planetscale/cli/internal/promptutil"
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 	"github.com/spf13/cobra"
 )
 

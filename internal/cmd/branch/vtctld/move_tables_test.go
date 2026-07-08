@@ -13,7 +13,7 @@ import (
 	"github.com/planetscale/cli/internal/config"
 	"github.com/planetscale/cli/internal/mock"
 	"github.com/planetscale/cli/internal/printer"
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 )
 
 func moveTablesTestHelper(org string, moveTables ps.MoveTablesService, vtctld ps.VtctldService, buf *bytes.Buffer) *cmdutil.Helper {

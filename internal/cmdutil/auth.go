@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/planetscale/cli/internal/config"
-	"github.com/planetscale/planetscale-go/planetscale"
+	"github.com/planetscale/cli/internal/planetscale"
 	"github.com/spf13/cobra"
 )
 

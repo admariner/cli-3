@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 )
 
 func testNotifyClient(t *testing.T, baseURL string) *ps.Client {

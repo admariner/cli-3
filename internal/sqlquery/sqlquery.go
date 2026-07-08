@@ -16,7 +16,7 @@ import (
 	"github.com/planetscale/cli/internal/passwordutil"
 	"github.com/planetscale/cli/internal/proxyutil"
 	"github.com/planetscale/cli/internal/roleutil"
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 	"vitess.io/vitess/go/mysql"
 )
 

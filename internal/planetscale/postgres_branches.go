@@ -1,0 +1,302 @@
+package planetscale
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/url"
+	"path"
+	"time"
+)
+
+// PostgresBranch represents a Postgres branch in the PlanetScale API.
+type PostgresBranch struct {
+	ID                  string    `json:"id"`
+	Name                string    `json:"name"`
+	ClusterName         string    `json:"cluster_name"`
+	ClusterDisplayName  string    `json:"cluster_display_name"`
+	ClusterArchitecture string    `json:"cluster_architecture"`
+	ClusterIOPS         int       `json:"cluster_iops"`
+	State               string    `json:"state"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
+	Actor               Actor     `json:"actor"`
+	Production          bool      `json:"production"`
+	Ready               bool      `json:"ready"`
+	ParentBranch        string    `json:"parent_branch"`
+	Region              Region    `json:"region"`
+	Kind                string    `json:"kind"`
+	Replicas            int       `json:"replicas"`
+}
+
+type postgresBranchesResponse struct {
+	Branches []*PostgresBranch `json:"data"`
+}
+
+// CreatePostgresBranchRequest encapsulates the request to create a Postgres branch.
+type CreatePostgresBranchRequest struct {
+	Organization string `json:"-"`
+	Database     string `json:"-"`
+	Region       string `json:"region,omitempty"`
+	Name         string `json:"name"`
+	ParentBranch string `json:"parent_branch"`
+	BackupID     string `json:"backup_id,omitempty"`
+	ClusterName  string `json:"cluster_name,omitempty"`
+	MajorVersion string         `json:"major_version,omitempty"`
+	Storage      *StorageConfig `json:"storage,omitempty"`
+}
+
+// ListPostgresBranchesRequest encapsulates the request to list Postgres branches for a database.
+type ListPostgresBranchesRequest struct {
+	Organization string
+	Database     string
+}
+
+// GetPostgresBranchRequest encapsulates the request to get a specific Postgres branch.
+type GetPostgresBranchRequest struct {
+	Organization string
+	Database     string
+	Branch       string
+}
+
+// DeletePostgresBranchRequest encapsulates the request to delete a Postgres branch.
+type DeletePostgresBranchRequest struct {
+	Organization      string
+	Database          string
+	Branch            string
+	DeleteDescendants bool
+}
+
+// ResizePostgresBranchRequest encapsulates the request to resize a Postgres
+// branch's cluster (and optionally change its replica count).
+type ResizePostgresBranchRequest struct {
+	Organization string `json:"-"`
+	Database     string `json:"-"`
+	Branch       string `json:"-"`
+
+	// ClusterSize is the fully-qualified cluster size SKU name to resize to,
+	// e.g. "PS_10_GCP_X86". Use the values returned by ListClusterSKUs.
+	ClusterSize string `json:"cluster_size,omitempty"`
+	// Replicas is the desired number of replicas. Nil leaves it unchanged.
+	Replicas *int `json:"replicas,omitempty"`
+}
+
+// PostgresBranchClusterResizeRequest represents an asynchronous Postgres branch
+// cluster change (resize) request.
+type PostgresBranchClusterResizeRequest struct {
+	ID    string `json:"id"`
+	State string `json:"state"`
+
+	ClusterName        string `json:"cluster_name"`
+	ClusterDisplayName string `json:"cluster_display_name"`
+	Replicas           int    `json:"replicas"`
+
+	PreviousClusterName        string `json:"previous_cluster_name"`
+	PreviousClusterDisplayName string `json:"previous_cluster_display_name"`
+	PreviousReplicas           int    `json:"previous_replicas"`
+
+	StartedAt   *time.Time `json:"started_at"`
+	CompletedAt *time.Time `json:"completed_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
+// PostgresBranchSchemaRequest encapsulates the request to get the schema of a Postgres branch.
+type PostgresBranchSchemaRequest struct {
+	Organization string
+	Database     string
+	Branch       string
+	Namespace    string `json:"-"`
+}
+
+// PostgresBranchSchema encapsulates the schema of a Postgres branch.
+type PostgresBranchSchema struct {
+	Name string `json:"name"`
+	Raw  string `json:"raw"`
+	HTML string `json:"html"`
+}
+
+// postgresBranchSchemaResponse returns the schemas
+type postgresBranchSchemaResponse struct {
+	Schemas []*PostgresBranchSchema `json:"data"`
+}
+
+type PostgresBranchesService interface {
+	Create(context.Context, *CreatePostgresBranchRequest) (*PostgresBranch, error)
+	List(context.Context, *ListPostgresBranchesRequest, ...ListOption) ([]*PostgresBranch, error)
+	Get(context.Context, *GetPostgresBranchRequest) (*PostgresBranch, error)
+	Delete(context.Context, *DeletePostgresBranchRequest) error
+	Schema(context.Context, *PostgresBranchSchemaRequest) ([]*PostgresBranchSchema, error)
+	ListClusterSKUs(context.Context, *ListBranchClusterSKUsRequest, ...ListOption) ([]*ClusterSKU, error)
+	Resize(context.Context, *ResizePostgresBranchRequest) (*PostgresBranchClusterResizeRequest, error)
+}
+
+type postgresBranchesService struct {
+	client *Client
+}
+
+var _ PostgresBranchesService = &postgresBranchesService{}
+
+func NewPostgresBranchesService(client *Client) *postgresBranchesService {
+	return &postgresBranchesService{
+		client: client,
+	}
+}
+
+// Create creates a new Postgres branch in the specified organization and database.
+func (p *postgresBranchesService) Create(ctx context.Context, createReq *CreatePostgresBranchRequest) (*PostgresBranch, error) {
+	path := postgresBranchesAPIPath(createReq.Organization, createReq.Database)
+	req, err := p.client.newRequest(http.MethodPost, path, createReq)
+	if err != nil {
+		return nil, fmt.Errorf("error creating http request: %w", err)
+	}
+
+	b := &PostgresBranch{}
+	if err := p.client.do(ctx, req, b); err != nil {
+		return nil, err
+	}
+
+	return b, nil
+}
+
+// List returns a list of Postgres branches for the specified organization and database.
+func (p *postgresBranchesService) List(ctx context.Context, listReq *ListPostgresBranchesRequest, opts ...ListOption) ([]*PostgresBranch, error) {
+	path := postgresBranchesAPIPath(listReq.Organization, listReq.Database)
+
+	defaultOpts := defaultListOptions(WithPerPage(100))
+	for _, opt := range opts {
+		err := opt(defaultOpts)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	req, err := p.client.newRequest(http.MethodGet, path, nil, WithQueryParams(*defaultOpts.URLValues))
+	if err != nil {
+		return nil, fmt.Errorf("error creating http request: %w", err)
+	}
+
+	pgBranches := &postgresBranchesResponse{}
+	if err := p.client.do(ctx, req, &pgBranches); err != nil {
+		return nil, err
+	}
+
+	return pgBranches.Branches, nil
+}
+
+// Get returns a single Postgres branch for the specified organization, database, and branch.
+func (p *postgresBranchesService) Get(ctx context.Context, getReq *GetPostgresBranchRequest) (*PostgresBranch, error) {
+	path := path.Join(postgresBranchesAPIPath(getReq.Organization, getReq.Database), getReq.Branch)
+	req, err := p.client.newRequest(http.MethodGet, path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("error creating http request: %w", err)
+	}
+
+	pgBranch := &PostgresBranch{}
+	if err := p.client.do(ctx, req, &pgBranch); err != nil {
+		return nil, err
+	}
+
+	return pgBranch, nil
+}
+
+// Delete deletes a Postgres branch from the specified organization and database.
+func (p *postgresBranchesService) Delete(ctx context.Context, deleteReq *DeletePostgresBranchRequest) error {
+	path := path.Join(postgresBranchesAPIPath(deleteReq.Organization, deleteReq.Database), deleteReq.Branch)
+
+	var opts []RequestOption
+	if deleteReq.DeleteDescendants {
+		v := url.Values{}
+		v.Set("delete_descendants", "true")
+		opts = append(opts, WithQueryParams(v))
+	}
+
+	req, err := p.client.newRequest(http.MethodDelete, path, nil, opts...)
+	if err != nil {
+		return fmt.Errorf("error creating http request: %w", err)
+	}
+
+	err = p.client.do(ctx, req, nil)
+	return err
+}
+
+// ListClusterSKUs returns a list of cluster SKUs for the specified Postgres branch.
+func (p *postgresBranchesService) ListClusterSKUs(ctx context.Context, listReq *ListBranchClusterSKUsRequest, opts ...ListOption) ([]*ClusterSKU, error) {
+	path := path.Join(postgresBranchAPIPath(listReq.Organization, listReq.Database, listReq.Branch), "cluster-size-skus")
+
+	defaultOpts := defaultListOptions()
+	for _, opt := range opts {
+		err := opt(defaultOpts)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	req, err := p.client.newRequest(http.MethodGet, path, nil, WithQueryParams(*defaultOpts.URLValues))
+	if err != nil {
+		return nil, fmt.Errorf("error creating http request: %w", err)
+	}
+
+	clusterSKUs := []*ClusterSKU{}
+	if err := p.client.do(ctx, req, &clusterSKUs); err != nil {
+		return nil, err
+	}
+
+	return clusterSKUs, nil
+}
+
+// Resize starts an asynchronous resize of a Postgres branch's cluster (and
+// optionally changes its replica count). It returns the resulting change
+// request, whose State can be polled via the branch changes API. A nil change
+// request is returned when the requested configuration matches the current one
+// (the API responds 204 No Content).
+func (p *postgresBranchesService) Resize(ctx context.Context, resizeReq *ResizePostgresBranchRequest) (*PostgresBranchClusterResizeRequest, error) {
+	path := path.Join(postgresBranchAPIPath(resizeReq.Organization, resizeReq.Database, resizeReq.Branch), "changes")
+	req, err := p.client.newRequest(http.MethodPatch, path, resizeReq)
+	if err != nil {
+		return nil, fmt.Errorf("error creating http request: %w", err)
+	}
+
+	change := &PostgresBranchClusterResizeRequest{}
+	if err := p.client.do(ctx, req, change); err != nil {
+		return nil, err
+	}
+
+	// A 204 No Content response (requested configuration already matches the
+	// current one) leaves the body, and therefore the ID, empty. Surface that
+	// as a nil change request so callers can detect the no-op.
+	if change.ID == "" {
+		return nil, nil
+	}
+
+	return change, nil
+}
+
+// Schema returns the schema for the specified Postgres branch.
+func (p *postgresBranchesService) Schema(ctx context.Context, schemaReq *PostgresBranchSchemaRequest) ([]*PostgresBranchSchema, error) {
+	path := path.Join(postgresBranchAPIPath(schemaReq.Organization, schemaReq.Database, schemaReq.Branch), "schema")
+	v := url.Values{}
+	if schemaReq.Namespace != "" {
+		v.Set("namespace", schemaReq.Namespace)
+	}
+
+	req, err := p.client.newRequest(http.MethodGet, path, nil, WithQueryParams(v))
+	if err != nil {
+		return nil, fmt.Errorf("error creating http request: %w", err)
+	}
+
+	schemas := &postgresBranchSchemaResponse{}
+	if err := p.client.do(ctx, req, &schemas); err != nil {
+		return nil, err
+	}
+
+	return schemas.Schemas, nil
+}
+
+func postgresBranchesAPIPath(org, db string) string {
+	return path.Join(databasesAPIPath(org), db, "branches")
+}
+
+func postgresBranchAPIPath(org, db, branch string) string {
+	return path.Join(postgresBranchesAPIPath(org, db), branch)
+}

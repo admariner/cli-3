@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/planetscale/cli/internal/printer"
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 )
 
 func PrintDataImport(p *printer.Printer, di ps.DataImport) {

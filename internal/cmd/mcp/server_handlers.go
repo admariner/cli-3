@@ -10,7 +10,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/planetscale/cli/internal/cmdutil"
-	"github.com/planetscale/planetscale-go/planetscale"
+	"github.com/planetscale/cli/internal/planetscale"
 	"golang.org/x/oauth2"
 )
 

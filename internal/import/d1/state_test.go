@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 )
 
 func TestCompleteRequiresVerifiedPhase(t *testing.T) {

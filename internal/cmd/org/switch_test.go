@@ -13,7 +13,7 @@ import (
 	"github.com/planetscale/cli/internal/mock"
 	"github.com/planetscale/cli/internal/printer"
 	"github.com/planetscale/cli/internal/testutil"
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 
 	qt "github.com/frankban/quicktest"
 )

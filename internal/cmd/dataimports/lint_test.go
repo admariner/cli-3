@@ -12,7 +12,7 @@ import (
 	"github.com/planetscale/cli/internal/config"
 	"github.com/planetscale/cli/internal/mock"
 	"github.com/planetscale/cli/internal/printer"
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 )
 
 func TestImports_LintDatabase_Success(t *testing.T) {

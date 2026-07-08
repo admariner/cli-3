@@ -11,7 +11,7 @@ import (
 
 	"github.com/adrg/xdg"
 	"github.com/mitchellh/go-homedir"
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 	"github.com/spf13/cobra"
 	exec "golang.org/x/sys/execabs"
 

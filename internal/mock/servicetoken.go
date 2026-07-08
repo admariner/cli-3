@@ -3,7 +3,7 @@ package mock
 import (
 	"context"
 
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 )
 
 type ServiceTokenService struct {
