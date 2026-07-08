@@ -105,6 +105,33 @@ func TestBranch_QueryPatternsDownloadCmd(t *testing.T) {
 	})
 }
 
+func TestBranch_QueryPatternsDownloadCmd_Stdout(t *testing.T) {
+	c := qt.New(t)
+
+	prevInterval := queryPatternsPollInterval
+	queryPatternsPollInterval = 10 * time.Millisecond
+	t.Cleanup(func() { queryPatternsPollInterval = prevInterval })
+
+	server := queryPatternsServer(t, c, []string{"pending", "completed"})
+
+	var buf bytes.Buffer
+	ch := queryPatternsTestHelper("my-org", server.URL, printer.Human, &buf)
+
+	var humanOut bytes.Buffer
+	ch.Printer.SetHumanOutput(&humanOut)
+
+	var stdout bytes.Buffer
+	cmd := QueryPatternsCmd(ch)
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"download", "my-db", "my-branch", "--output", "-"})
+	err := cmd.Execute()
+
+	c.Assert(err, qt.IsNil)
+	c.Assert(stdout.String(), qt.Equals, queryPatternsCSV)
+	c.Assert(humanOut.String(), qt.Equals, "")
+	c.Assert(buf.String(), qt.Equals, "")
+}
+
 func TestBranch_QueryPatternsDownloadCmd_Failed(t *testing.T) {
 	c := qt.New(t)
 
