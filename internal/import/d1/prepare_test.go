@@ -63,6 +63,65 @@ func TestImport_BlocksOnLintErrors(t *testing.T) {
 	}
 }
 
+func TestImportDryRunPersistsExplicitDBName(t *testing.T) {
+	t.Setenv("PSCALE_TEST_MODE", "1")
+
+	org, database, branch := "acme", "mydb", "main"
+	opts := ImportOptions{
+		InputPath:      testFixture(t),
+		Org:            org,
+		Database:       database,
+		Branch:         branch,
+		DBName:         "appdb",
+		DBNameExplicit: true,
+		DryRun:         true,
+	}
+
+	result, err := Import(context.Background(), nil, nil, opts, nil)
+	if err != nil {
+		t.Fatalf("Import dry run: %v", err)
+	}
+
+	state, err := LoadState(org, database, branch, result.MigrationID)
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	if state.DBName != "appdb" {
+		t.Fatalf("state db_name = %q, want %q", state.DBName, "appdb")
+	}
+
+	// A resumed start without --dbname must pick up the dry-run value.
+	resolved := ResolveMigrationDBName(org, database, branch, result.MigrationID, "postgres", false)
+	if resolved != "appdb" {
+		t.Fatalf("resolved db name = %q, want %q", resolved, "appdb")
+	}
+}
+
+func TestImportDryRunWithoutExplicitDBNameLeavesStateUntouched(t *testing.T) {
+	t.Setenv("PSCALE_TEST_MODE", "1")
+
+	org, database, branch := "acme", "mydb", "main"
+	result, err := Import(context.Background(), nil, nil, ImportOptions{
+		InputPath: testFixture(t),
+		Org:       org,
+		Database:  database,
+		Branch:    branch,
+		DBName:    "postgres",
+		DryRun:    true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Import dry run: %v", err)
+	}
+
+	state, err := LoadState(org, database, branch, result.MigrationID)
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	if state.DBName != "" {
+		t.Fatalf("state db_name = %q, want empty", state.DBName)
+	}
+}
+
 func TestPrepareImportRejectsMissingMigrationState(t *testing.T) {
 	t.Setenv("PSCALE_TEST_MODE", "1")
 

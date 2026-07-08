@@ -83,6 +83,16 @@ func Import(ctx context.Context, psClient *ps.Client, client ImportClient, opts 
 	}
 
 	if opts.DryRun {
+		// An explicit --dbname must survive the dry run so a later
+		// start --migration-id without the flag targets the same database.
+		if opts.DBNameExplicit {
+			err := updateMigrationState(opts.Org, opts.Database, opts.Branch, opts.MigrationID, func(state *MigrationState) {
+				applyStateDBName(state, opts.DBName, true)
+			})
+			if err != nil {
+				return result, err
+			}
+		}
 		return result, nil
 	}
 
