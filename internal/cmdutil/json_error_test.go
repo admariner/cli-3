@@ -165,6 +165,26 @@ func TestGlobalJSONErrorStripsANSI(t *testing.T) {
 	}
 }
 
+func TestGlobalJSONErrorTTYRequired(t *testing.T) {
+	login := GlobalJSONError(errors.New("the 'login' command requires an interactive shell (use --format json; browser opens when possible, then polls until approved)"))
+	if login.Status != "action_required" || login.Code() != "TTY_REQUIRED" {
+		t.Fatalf("login: status = %q, code = %q", login.Status, login.Code())
+	}
+	if len(login.NextSteps) == 0 || login.NextSteps[0] != AgentAuthLoginCmd() {
+		t.Fatalf("login next_steps = %#v", login.NextSteps)
+	}
+
+	replay := GlobalJSONError(errors.New("--replay requires an interactive terminal"))
+	if replay.Status != "action_required" || replay.Code() != "TTY_REQUIRED" {
+		t.Fatalf("replay: status = %q, code = %q", replay.Status, replay.Code())
+	}
+	for _, step := range replay.NextSteps {
+		if step == AgentAuthLoginCmd() {
+			t.Fatalf("replay should not suggest auth login, got %#v", replay.NextSteps)
+		}
+	}
+}
+
 func TestGlobalJSONErrorUsesCmdErrorMessage(t *testing.T) {
 	resp := GlobalJSONError(&Error{
 		Msg:      "You are not authenticated.",

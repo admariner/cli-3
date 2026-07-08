@@ -116,11 +116,17 @@ func GlobalJSONError(err error) JSONErrorResponse {
 			AgentGuideCmd(),
 		}
 
-	// TTY-gated commands: JSON mode is the non-interactive path.
-	case strings.Contains(msg, "requires an interactive shell"):
+	// TTY-gated commands: messages vary ("interactive shell", "interactive
+	// terminal"), so match the shared prefix. Only login has a JSON-mode
+	// alternative worth suggesting.
+	case strings.Contains(msg, "requires an interactive"):
 		status = "action_required"
 		code = "TTY_REQUIRED"
-		nextSteps = []string{AgentAuthLoginCmd()}
+		if strings.Contains(lower, "login") {
+			nextSteps = []string{AgentAuthLoginCmd()}
+		} else {
+			nextSteps = []string{"Re-run this command in an interactive terminal"}
+		}
 
 	// Confirmation-gated commands: the fix is user approval, then --force.
 	case strings.Contains(msg, "run with --force"):
