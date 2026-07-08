@@ -157,6 +157,23 @@ Error: one JSON object on stdout with `status: "error"`, `error`, and `next_step
 
 Destructive SQL without `--force`: `status: "action_required"`, `query_kind: "destructive"`, `issues`, and `next_steps` (includes `--force` retry command).
 
+## Imports (Cloudflare D1)
+
+`pscale import d1` migrates a Cloudflare D1 (SQLite) export into a PlanetScale Postgres branch. Every subcommand supports `--format json` and returns `status`, `issues`, and `next_steps`; stateful steps return a `migration_id` — pass it back with `--migration-id` to resume.
+
+```bash
+pscale import d1 doctor --format json                              # check prerequisites (pgloader, psql)
+pscale import d1 lint --input <file> --format json                 # pre-import checks; errors block import
+pscale import d1 start <database> --org <org> --input <file> --dry-run --format json  # plan + migration ID, no writes
+pscale import d1 start <database> --org <org> --input <file> --format json            # run the import
+pscale import d1 verify <database> --org <org> --migration-id <id> --sqlite <file> --format json
+pscale import d1 complete <database> --org <org> --migration-id <id> --format json
+```
+
+Branch is an optional second positional (defaults to the default branch). `status --migration-id <id>` shows saved migration state; `convert-schema --input <file>` converts schema only.
+
+**`start` in JSON mode does not prompt.** The confirmation prompt is human-format only; with `--format json`, `start` loads data immediately. Run `start --dry-run` first, show the user the plan, and only run the real `start` after they approve.
+
 ## API passthrough
 
 ```bash
