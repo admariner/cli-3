@@ -42,6 +42,12 @@ func handleExecuteError(ch *cmdutil.Helper, err error, database, branch string) 
 	return reportJSON(ch, map[string]any{
 		"status": "error",
 		"error":  err.Error(),
+		"issues": []map[string]string{
+			{
+				"code":    "COMMAND_FAILED",
+				"message": err.Error(),
+			},
+		},
 		"next_steps": []string{
 			cmdutil.AgentAuthCheckCmd(),
 			cmdutil.AgentSQLCmd(ch.Config.Organization, database, branch, false),

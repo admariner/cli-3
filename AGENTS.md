@@ -93,6 +93,42 @@ pscale --org <org> database list --format json
 | `--org <org>` | Organization (on resource subcommands only) |
 | `--api-url` | Non-production API base URL — pass on every command when not using production |
 
+## JSON errors
+
+With `--format json`, any command that fails prints exactly one JSON envelope on **stdout**:
+
+```json
+{
+  "status": "error",
+  "error": "human-readable message",
+  "issues": [{ "code": "NOT_FOUND", "message": "human-readable message" }],
+  "next_steps": ["pscale org list --format json", "pscale database list --org <org> --format json"]
+}
+```
+
+- `status` is `"error"` or `"action_required"`. `action_required` means an agent can recover by following `next_steps` (log in, ask the user for approval, fix the invocation). Exit code is `1` for `action_required` and `2` for `error`.
+- `issues[].code` is stable and machine-readable; branch on it, not on message text.
+- `next_steps` are concrete commands or instructions, ordered by likelihood.
+
+Some commands add fields to this envelope (for example `query_kind` on destructive SQL or `migration_id` on imports) but `status`, `issues`, and `next_steps` are always present on failure.
+
+| Code | Meaning |
+|------|---------|
+| `NO_AUTH` | Not authenticated or token expired; run `pscale auth login --format json` |
+| `AUTH_INVALID` | Stored credentials rejected by the API; log in again |
+| `SERVICE_TOKEN_INVALID` | Service token id/secret rejected; verify the values |
+| `NO_ORG` | Authenticated but no organization configured |
+| `INVALID_FLAG_PLACEMENT` | `--org` was passed on `pscale` root; move it to the subcommand |
+| `INVALID_USAGE` | Missing arguments or required flags; the message names them |
+| `UNKNOWN_COMMAND` | Command does not exist; check `pscale --help` |
+| `UNKNOWN_FLAG` | Flag does not exist on this command; check `--help` |
+| `TTY_REQUIRED` | Command needs an interactive terminal; use the JSON alternative in `next_steps` |
+| `CONFIRMATION_REQUIRED` | Destructive or gated action; ask the user, then re-run with `--force` |
+| `DESTRUCTIVE_SQL` | Query would delete data or schema; ask the user, then re-run with `--force` |
+| `NOT_FOUND` | Org, database, branch, or resource does not exist; run the discovery commands |
+| `NETWORK_ERROR` | Transport-level failure; check connectivity and `--api-url`, then retry |
+| `COMMAND_FAILED` | Unclassified failure; read `error` and rule out auth first |
+
 ## Authentication
 
 `pscale auth login` stores credentials in the OS keychain; agents on the same machine reuse them.
@@ -153,7 +189,7 @@ Success: `status`, `database`, `branch`, `kind` (`mysql` or `postgresql`), `role
 
 MySQL may return synthetic column names (e.g. `:vtg1 /* INT64 */`). PostgreSQL may use names like `?column?`.
 
-Error: one JSON object on stdout with `status: "error"`, `error`, and `next_steps`.
+Error: one JSON object on stdout with `status: "error"`, `error`, `issues`, and `next_steps` (see JSON errors above).
 
 Destructive SQL without `--force`: `status: "action_required"`, `query_kind: "destructive"`, `issues`, and `next_steps` (includes `--force` retry command).
 

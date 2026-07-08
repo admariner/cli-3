@@ -12,8 +12,8 @@ func TestGlobalJSONErrorAuthRequired(t *testing.T) {
 	if resp.Status != "action_required" {
 		t.Fatalf("status = %q", resp.Status)
 	}
-	if resp.Code != "NO_AUTH" {
-		t.Fatalf("code = %q", resp.Code)
+	if resp.Code() != "NO_AUTH" {
+		t.Fatalf("code = %q", resp.Code())
 	}
 	if len(resp.NextSteps) == 0 || resp.NextSteps[0] != AgentAuthLoginCmd() {
 		t.Fatalf("next_steps = %#v", resp.NextSteps)
@@ -25,8 +25,8 @@ func TestGlobalJSONErrorInvalidUsageSkipsAuth(t *testing.T) {
 	if resp.Status != "action_required" {
 		t.Fatalf("status = %q", resp.Status)
 	}
-	if resp.Code != "INVALID_USAGE" {
-		t.Fatalf("code = %q", resp.Code)
+	if resp.Code() != "INVALID_USAGE" {
+		t.Fatalf("code = %q", resp.Code())
 	}
 	for _, step := range resp.NextSteps {
 		if step == AgentAuthCheckCmd() || step == AgentAuthLoginCmd() {
@@ -37,8 +37,8 @@ func TestGlobalJSONErrorInvalidUsageSkipsAuth(t *testing.T) {
 
 func TestGlobalJSONErrorOrgFlagPlacement(t *testing.T) {
 	resp := GlobalJSONError(errors.New("unknown flag: --org"))
-	if resp.Code != "INVALID_FLAG_PLACEMENT" {
-		t.Fatalf("code = %q", resp.Code)
+	if resp.Code() != "INVALID_FLAG_PLACEMENT" {
+		t.Fatalf("code = %q", resp.Code())
 	}
 	if len(resp.NextSteps) != 2 || resp.NextSteps[1] != AgentDatabaseListCmd("") {
 		t.Fatalf("next_steps = %#v", resp.NextSteps)
@@ -47,15 +47,15 @@ func TestGlobalJSONErrorOrgFlagPlacement(t *testing.T) {
 
 func TestGlobalJSONErrorUnknownFlag(t *testing.T) {
 	resp := GlobalJSONError(errors.New("unknown flag: --bogus"))
-	if resp.Code != "UNKNOWN_FLAG" {
-		t.Fatalf("code = %q", resp.Code)
+	if resp.Code() != "UNKNOWN_FLAG" {
+		t.Fatalf("code = %q", resp.Code())
 	}
 }
 
 func TestGlobalJSONErrorUnknownCommand(t *testing.T) {
 	resp := GlobalJSONError(errors.New(`unknown command "wat" for "pscale"`))
-	if resp.Code != "UNKNOWN_COMMAND" {
-		t.Fatalf("code = %q", resp.Code)
+	if resp.Code() != "UNKNOWN_COMMAND" {
+		t.Fatalf("code = %q", resp.Code())
 	}
 	for _, step := range resp.NextSteps {
 		if step == AgentAuthCheckCmd() {
@@ -69,8 +69,8 @@ func TestGlobalJSONErrorConfirmationRequired(t *testing.T) {
 	if resp.Status != "action_required" {
 		t.Fatalf("status = %q", resp.Status)
 	}
-	if resp.Code != "CONFIRMATION_REQUIRED" {
-		t.Fatalf("code = %q", resp.Code)
+	if resp.Code() != "CONFIRMATION_REQUIRED" {
+		t.Fatalf("code = %q", resp.Code())
 	}
 	if len(resp.NextSteps) != 2 {
 		t.Fatalf("next_steps = %#v", resp.NextSteps)
@@ -79,8 +79,8 @@ func TestGlobalJSONErrorConfirmationRequired(t *testing.T) {
 
 func TestGlobalJSONErrorNotFound(t *testing.T) {
 	resp := GlobalJSONError(errors.New("database foo does not exist in organization bar"))
-	if resp.Code != "NOT_FOUND" {
-		t.Fatalf("code = %q", resp.Code)
+	if resp.Code() != "NOT_FOUND" {
+		t.Fatalf("code = %q", resp.Code())
 	}
 	if len(resp.NextSteps) == 0 || resp.NextSteps[0] != AgentOrgListCmd() {
 		t.Fatalf("next_steps = %#v", resp.NextSteps)
@@ -96,8 +96,8 @@ func TestGlobalJSONErrorNetwork(t *testing.T) {
 		"net/http: TLS handshake timeout",
 	}
 	for _, msg := range networkErrors {
-		if resp := GlobalJSONError(errors.New(msg)); resp.Code != "NETWORK_ERROR" {
-			t.Fatalf("code = %q for %q", resp.Code, msg)
+		if resp := GlobalJSONError(errors.New(msg)); resp.Code() != "NETWORK_ERROR" {
+			t.Fatalf("code = %q for %q", resp.Code(), msg)
 		}
 	}
 }
@@ -111,7 +111,7 @@ func TestGlobalJSONErrorOperationTimeoutIsNotNetwork(t *testing.T) {
 		"query timeout exceeded for SELECT",
 	}
 	for _, msg := range operationTimeouts {
-		if resp := GlobalJSONError(errors.New(msg)); resp.Code == "NETWORK_ERROR" {
+		if resp := GlobalJSONError(errors.New(msg)); resp.Code() == "NETWORK_ERROR" {
 			t.Fatalf("misclassified %q as NETWORK_ERROR", msg)
 		}
 	}
@@ -122,8 +122,8 @@ func TestGlobalJSONErrorServiceToken(t *testing.T) {
 	if resp.Status != "action_required" {
 		t.Fatalf("status = %q", resp.Status)
 	}
-	if resp.Code != "SERVICE_TOKEN_INVALID" {
-		t.Fatalf("code = %q", resp.Code)
+	if resp.Code() != "SERVICE_TOKEN_INVALID" {
+		t.Fatalf("code = %q", resp.Code())
 	}
 }
 
@@ -132,11 +132,36 @@ func TestGlobalJSONErrorGenericFallback(t *testing.T) {
 	if resp.Status != "error" {
 		t.Fatalf("status = %q", resp.Status)
 	}
-	if resp.Code != "COMMAND_FAILED" {
-		t.Fatalf("code = %q", resp.Code)
+	if resp.Code() != "COMMAND_FAILED" {
+		t.Fatalf("code = %q", resp.Code())
 	}
 	if len(resp.NextSteps) != 2 || resp.NextSteps[0] != AgentAuthCheckCmd() {
 		t.Fatalf("next_steps = %#v", resp.NextSteps)
+	}
+}
+
+func TestGlobalJSONErrorIssuesMirrorError(t *testing.T) {
+	resp := GlobalJSONError(errors.New("something went wrong"))
+	if len(resp.Issues) != 1 {
+		t.Fatalf("issues = %#v", resp.Issues)
+	}
+	if resp.Issues[0].Message != resp.Error {
+		t.Fatalf("issue message %q != error %q", resp.Issues[0].Message, resp.Error)
+	}
+}
+
+func TestGlobalJSONErrorStripsANSI(t *testing.T) {
+	colored := "database \x1b[1;34mfoo\x1b[0m does not exist in organization \x1b[1;34mbar\x1b[0m"
+	resp := GlobalJSONError(errors.New(colored))
+	want := "database foo does not exist in organization bar"
+	if resp.Error != want {
+		t.Fatalf("error = %q, want %q", resp.Error, want)
+	}
+	if resp.Issues[0].Message != want {
+		t.Fatalf("issue message = %q, want %q", resp.Issues[0].Message, want)
+	}
+	if resp.Code() != "NOT_FOUND" {
+		t.Fatalf("code = %q", resp.Code())
 	}
 }
 
@@ -150,6 +175,21 @@ func TestGlobalJSONErrorUsesCmdErrorMessage(t *testing.T) {
 	}
 	if resp.Status != "action_required" {
 		t.Fatalf("status = %q", resp.Status)
+	}
+}
+
+func TestGlobalJSONErrorKeepsActionRequiredForUnclassified(t *testing.T) {
+	// An action-required exit code must survive classification even when the
+	// message matches no known pattern.
+	resp := GlobalJSONError(&Error{
+		Msg:      "operator approval pending",
+		ExitCode: ActionRequestedExitCode,
+	})
+	if resp.Status != "action_required" {
+		t.Fatalf("status = %q", resp.Status)
+	}
+	if resp.Code() != "COMMAND_FAILED" {
+		t.Fatalf("code = %q", resp.Code())
 	}
 }
 
@@ -170,7 +210,7 @@ func TestReportGlobalJSONError(t *testing.T) {
 	if resp.Status != "error" {
 		t.Fatalf("status = %q", resp.Status)
 	}
-	if resp.Error == "" || len(resp.NextSteps) == 0 {
+	if resp.Error == "" || len(resp.Issues) != 1 || len(resp.NextSteps) == 0 {
 		t.Fatalf("resp = %#v", resp)
 	}
 }

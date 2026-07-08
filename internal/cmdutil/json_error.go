@@ -5,16 +5,39 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 )
 
-// JSONErrorResponse is the fallback JSON envelope for unhandled command errors.
-type JSONErrorResponse struct {
-	Status    string   `json:"status"`
-	Code      string   `json:"code,omitempty"`
-	Error     string   `json:"error"`
-	NextSteps []string `json:"next_steps"`
+// JSONErrorIssue mirrors the issue shape used by auth check, sql, and import
+// d1 responses: a stable machine-readable code plus the human message.
+type JSONErrorIssue struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
+
+// JSONErrorResponse is the fallback JSON envelope for unhandled command
+// errors. It follows the same schema as command-specific error responses:
+// status, error, issues (code + message), next_steps.
+type JSONErrorResponse struct {
+	Status    string           `json:"status"`
+	Error     string           `json:"error"`
+	Issues    []JSONErrorIssue `json:"issues"`
+	NextSteps []string         `json:"next_steps"`
+}
+
+// Code returns the classification code of the first issue.
+func (r JSONErrorResponse) Code() string {
+	if len(r.Issues) == 0 {
+		return ""
+	}
+	return r.Issues[0].Code
+}
+
+// ansiEscape matches CSI color/style sequences. Error messages built for
+// human output may embed them (e.g. via printer.BoldBlue); they must never
+// reach a JSON payload.
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 // GlobalJSONError classifies an error for the global JSON envelope.
 //
@@ -35,6 +58,8 @@ func GlobalJSONError(err error) JSONErrorResponse {
 			status = "action_required"
 		}
 	}
+
+	msg = ansiEscape.ReplaceAllString(msg, "")
 
 	var nextSteps []string
 	lower := strings.ToLower(msg)
@@ -140,8 +165,8 @@ func GlobalJSONError(err error) JSONErrorResponse {
 
 	return JSONErrorResponse{
 		Status:    status,
-		Code:      code,
 		Error:     msg,
+		Issues:    []JSONErrorIssue{{Code: code, Message: msg}},
 		NextSteps: nextSteps,
 	}
 }
