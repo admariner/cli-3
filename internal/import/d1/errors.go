@@ -24,7 +24,7 @@ const (
 const (
 	wranglerMissingRemediation = "Install wrangler, use npx wrangler d1 export, or pass --input if you already have a dump."
 	pgloaderInstallRemediation = "Install pgloader (brew install pgloader on macOS; see https://pgloader.readthedocs.io/en/latest/install.html for other platforms)"
-	lintBlockedRemediation     = "Fix lint errors or run `pscale import d1 lint` for details; use `import d1 start --dry-run` for a read-only preview"
+	lintBlockedRemediation     = "Fix the reported lint errors, then re-run; `pscale import d1 lint` shows details. Import (including --dry-run) is blocked until lint passes"
 )
 
 type MigrationError struct {

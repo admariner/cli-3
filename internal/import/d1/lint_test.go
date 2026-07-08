@@ -92,6 +92,28 @@ func TestLint(t *testing.T) {
 	}
 }
 
+func TestLintNextStepsBlockedOnErrorsDoesNotSuggestStart(t *testing.T) {
+	blocked := &LintResult{InputPath: "/tmp/export.sql", ErrorCount: 1}
+	steps := LintNextSteps(blocked)
+	if len(steps) != 1 {
+		t.Fatalf("steps = %d, want 1", len(steps))
+	}
+	if !strings.Contains(steps[0].Command, "import d1 lint") {
+		t.Fatalf("blocked next step should re-run lint, got %q", steps[0].Command)
+	}
+
+	clean := &LintResult{InputPath: "/tmp/export.sql"}
+	steps = LintNextSteps(clean)
+	if len(steps) != 2 {
+		t.Fatalf("steps = %d, want 2", len(steps))
+	}
+	for _, step := range steps {
+		if !strings.Contains(step.Command, "import d1 start") {
+			t.Fatalf("clean next steps should suggest start, got %q", step.Command)
+		}
+	}
+}
+
 func TestPlan(t *testing.T) {
 	plan, err := Plan(PlanOptions{
 		InputPath: testFixture(t),

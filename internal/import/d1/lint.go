@@ -186,17 +186,21 @@ func isJSONText(col ColumnSchema) bool {
 
 // LintNextSteps returns agent next steps based on lint results.
 func LintNextSteps(result *LintResult) []NextStep {
-	steps := []NextStep{
+	input := filepath.Base(result.InputPath)
+	if result.ErrorCount > 0 {
+		return []NextStep{{
+			Command: "pscale import d1 lint --input " + input,
+			Reason:  "Re-run lint after fixing the reported errors; import (including --dry-run) is blocked until lint passes",
+		}}
+	}
+	return []NextStep{
 		{
-			Command: "pscale import d1 start <database> --input " + filepath.Base(result.InputPath) + " --dry-run",
+			Command: "pscale import d1 start <database> --input " + input + " --dry-run",
 			Reason:  "Preview import plan and get a migration ID",
 		},
-	}
-	if result.ErrorCount == 0 {
-		steps = append(steps, NextStep{
-			Command: "pscale import d1 start <database> --input " + filepath.Base(result.InputPath),
+		{
+			Command: "pscale import d1 start <database> --input " + input,
 			Reason:  "Run import after lint passes",
-		})
+		},
 	}
-	return steps
 }
