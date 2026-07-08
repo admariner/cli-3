@@ -62,13 +62,14 @@ func TestResetDefaultCmd(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(svc.ResetDefaultRoleFnInvoked, qt.IsTrue)
 
-	expectedOutput := map[string]string{
-		"id":              "role-123",
-		"name":            "postgres",
-		"username":        "postgres",
-		"password":        "new-password-123",
-		"access_host_url": "pg.psdb.cloud",
-		"database_url":    "postgresql://postgres:new-password-123@pg.psdb.cloud:5432/postgres?sslmode=verify-full",
+	expectedOutput := map[string]any{
+		"id":               "role-123",
+		"name":             "postgres",
+		"username":         "postgres",
+		"password":         "new-password-123",
+		"access_host_url":  "pg.psdb.cloud",
+		"database_url":     "postgresql://postgres:new-password-123@pg.psdb.cloud:5432/postgres?sslmode=verify-full",
+		"with_replication": false,
 	}
 	c.Assert(buf.String(), qt.JSONEquals, expectedOutput)
 }

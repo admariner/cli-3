@@ -13,14 +13,20 @@ import (
 
 func CreateCmd(ch *cmdutil.Helper) *cobra.Command {
 	var flags struct {
-		ttl            cmdutil.TTLFlag
-		inheritedRoles string
+		ttl             cmdutil.TTLFlag
+		inheritedRoles  string
+		withReplication bool
 	}
 
 	cmd := &cobra.Command{
 		Use:   "create <database> <branch> <name>",
 		Short: "Create a new role for a Postgres database branch",
 		Args:  cmdutil.RequiredArgs("database", "branch", "name"),
+		Example: `  # Create a role with admin access
+  pscale role create mydb main my-role --inherited-roles postgres
+
+  # Create a role with REPLICATION privilege (requires the postgres inherited role)
+  pscale role create mydb main replicator --inherited-roles postgres --with-replication`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			database := args[0]
 			branch := args[1]
@@ -44,12 +50,13 @@ func CreateCmd(ch *cmdutil.Helper) *cobra.Command {
 			}
 
 			role, err := client.PostgresRoles.Create(cmd.Context(), &ps.CreatePostgresRoleRequest{
-				Organization:   ch.Config.Organization,
-				Database:       database,
-				Branch:         branch,
-				Name:           name,
-				TTL:            int(flags.ttl.Value.Seconds()),
-				InheritedRoles: inheritedRoles,
+				Organization:    ch.Config.Organization,
+				Database:        database,
+				Branch:          branch,
+				Name:            name,
+				TTL:             int(flags.ttl.Value.Seconds()),
+				InheritedRoles:  inheritedRoles,
+				WithReplication: flags.withReplication,
 			})
 			if err != nil {
 				switch cmdutil.ErrCode(err) {
@@ -78,6 +85,7 @@ func CreateCmd(ch *cmdutil.Helper) *cobra.Command {
 	}
 	cmd.PersistentFlags().Var(&flags.ttl, "ttl", `TTL defines the time to live for the role. Durations such as "30m", "24h", or bare integers such as "3600" (seconds) are accepted. The default TTL is 0s, which means the role will never expire.`)
 	cmd.PersistentFlags().StringVar(&flags.inheritedRoles, "inherited-roles", "", "Comma-separated list of role names to inherit privileges from. Common values are 'pg_read_all_data' for read access, 'pg_write_all_data' for write access, and 'postgres' for admin access.")
+	cmd.Flags().BoolVar(&flags.withReplication, "with-replication", false, "When enabled, the role is created with REPLICATION privilege for logical replication. Requires --inherited-roles to include 'postgres'.")
 
 	return cmd
 }
