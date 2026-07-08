@@ -82,6 +82,15 @@ Agents and automation should start with:
   pscale agent-guide --format json
   pscale auth check --format json`,
 	TraverseChildren: true,
+	// A non-runnable root returns help (exit 0) before args validation, so an
+	// unknown subcommand like "pscale wat" never errors and JSON mode prints
+	// help text instead of an UNKNOWN_COMMAND envelope. A RunE makes the root
+	// runnable, which lets Args reject unknown subcommands; bare "pscale"
+	// keeps showing help.
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return cmd.Help()
+	},
 }
 
 // Execute executes the command and returns the exit status of the finished
