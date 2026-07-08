@@ -159,19 +159,13 @@ func PrintStartPreview(p *printer.Printer, prepared *ImportPrepareResult) {
 	p.Println("\nImport preview")
 	if prepared.Lint != nil {
 		p.Printf("  Lint: %d error(s), %d warning(s)\n", prepared.Lint.ErrorCount, prepared.Lint.WarningCount)
+		var actionable []Issue
 		for _, issue := range prepared.Lint.Issues {
-			if issue.Severity != SeverityError && issue.Severity != SeverityWarning {
-				continue
+			if issue.Severity == SeverityError || issue.Severity == SeverityWarning {
+				actionable = append(actionable, issue)
 			}
-			loc := issue.Table
-			if issue.Column != "" {
-				loc += "." + issue.Column
-			}
-			if loc != "" {
-				loc = " " + loc
-			}
-			p.Printf("    [%s] %s%s: %s\n", issue.Severity, issue.Code, loc, previewMessage(issue))
 		}
+		printIssuesGrouped(p, actionable, "    ")
 	}
 	if prepared.Plan != nil {
 		sizeMB := float64(prepared.Plan.EstimatedSizeBytes) / (1024 * 1024)
@@ -186,11 +180,4 @@ func PrintStartPreview(p *printer.Printer, prepared *ImportPrepareResult) {
 		p.Printf("  Blocked: %s\n", prepared.BlockedReason)
 	}
 	p.Println()
-}
-
-func previewMessage(issue Issue) string {
-	if issue.Message != "" {
-		return issue.Message
-	}
-	return issue.Remediation
 }

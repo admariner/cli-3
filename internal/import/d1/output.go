@@ -2,6 +2,8 @@ package d1
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/planetscale/cli/internal/printer"
@@ -32,13 +34,7 @@ func PrintHumanResponse(p *printer.Printer, resp Response) {
 
 	if len(resp.Issues) > 0 {
 		p.Printf("\nIssues (%d):\n", len(resp.Issues))
-		for _, issue := range resp.Issues {
-			loc := issue.Table
-			if issue.Column != "" {
-				loc += "." + issue.Column
-			}
-			p.Printf("  [%s] %s %s: %s\n", issue.Severity, issue.Code, loc, issue.Remediation)
-		}
+		printIssuesGrouped(p, resp.Issues, "  ")
 	}
 
 	if len(resp.NextSteps) > 0 {
@@ -53,6 +49,116 @@ func PrintHumanResponse(p *printer.Printer, resp Response) {
 			}
 		}
 	}
+}
+
+type issueGroup struct {
+	severity  string
+	code      string
+	text      string
+	locations []string
+}
+
+// printIssuesGrouped renders issues ordered by severity (errors first) and
+// collapses issues sharing a code and message onto one line listing every
+// affected table/column, so a finding that hits many columns reads as one
+// entry instead of a wall of near-identical lines.
+func printIssuesGrouped(p *printer.Printer, issues []Issue, indent string) {
+	var groups []issueGroup
+	index := map[string]int{}
+	for _, issue := range issues {
+		text := issue.Remediation
+		if text == "" {
+			text = issue.Message
+		}
+		key := issue.Severity + "\x00" + issue.Code + "\x00" + text
+		i, ok := index[key]
+		if !ok {
+			i = len(groups)
+			index[key] = i
+			groups = append(groups, issueGroup{severity: issue.Severity, code: issue.Code, text: text})
+		}
+		loc := issue.Table
+		if issue.Column != "" {
+			loc += "." + issue.Column
+		}
+		if loc != "" {
+			groups[i].locations = append(groups[i].locations, loc)
+		}
+	}
+
+	sort.SliceStable(groups, func(a, b int) bool {
+		return severityRank(groups[a].severity) < severityRank(groups[b].severity)
+	})
+
+	lastSeverity := ""
+	for _, g := range groups {
+		if g.severity != lastSeverity {
+			p.Printf("%s%s:\n", indent, severityLabel(g.severity))
+			lastSeverity = g.severity
+		}
+		switch len(g.locations) {
+		case 0:
+			p.Printf("%s  %s: %s\n", indent, g.code, g.text)
+		case 1:
+			p.Printf("%s  %s %s: %s\n", indent, g.code, g.locations[0], g.text)
+		default:
+			p.Printf("%s  %s (%d): %s\n", indent, g.code, len(g.locations), g.text)
+			for _, line := range wrapList(g.locations, locationLineWidth-len(indent)-4) {
+				p.Printf("%s    %s\n", indent, line)
+			}
+		}
+	}
+}
+
+const locationLineWidth = 96
+
+// wrapList joins items with commas, breaking into multiple lines so no line
+// exceeds width (except when a single item is longer than width).
+func wrapList(items []string, width int) []string {
+	var lines []string
+	var line strings.Builder
+	for _, item := range items {
+		if line.Len() == 0 {
+			line.WriteString(item)
+			continue
+		}
+		if line.Len()+2+len(item) > width {
+			lines = append(lines, line.String()+",")
+			line.Reset()
+			line.WriteString(item)
+			continue
+		}
+		line.WriteString(", ")
+		line.WriteString(item)
+	}
+	if line.Len() > 0 {
+		lines = append(lines, line.String())
+	}
+	return lines
+}
+
+func severityRank(severity string) int {
+	switch severity {
+	case SeverityError:
+		return 0
+	case SeverityWarning:
+		return 1
+	case SeverityInfo:
+		return 2
+	}
+	return 3
+}
+
+func severityLabel(severity string) string {
+	switch severity {
+	case SeverityError:
+		return "Errors"
+	case SeverityWarning:
+		return "Warnings"
+	case SeverityInfo:
+		return "Info"
+	}
+	return severity
 }
 
 func printVerifyResultHuman(p *printer.Printer, r VerifyResult) {

@@ -116,12 +116,53 @@ func TestPrintHumanResponseIncludesLintIssuesOnError(t *testing.T) {
 	for _, want := range []string{
 		"Status: error",
 		"Errors: 1",
-		"[error] VIRTUAL_TABLE",
-		"Virtual tables are not supported",
+		"Errors:\n",
+		"VIRTUAL_TABLE fts: Virtual tables are not supported",
 		ErrCodeLintBlocked,
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestPrintIssuesGroupedCollapsesAndOrdersBySeverity(t *testing.T) {
+	issues := []Issue{
+		{Code: "TEXT_UUID", Severity: SeverityInfo, Table: "customers", Column: "id", Remediation: "will stay TEXT"},
+		{Code: "AUTOINCREMENT", Severity: SeverityWarning, Table: "notes", Column: "id", Remediation: "Will map to IDENTITY"},
+		{Code: "AUTOINCREMENT", Severity: SeverityWarning, Table: "attachments", Column: "id", Remediation: "Will map to IDENTITY"},
+		{Code: "VIRTUAL_TABLE", Severity: SeverityError, Table: "fts", Remediation: "Virtual tables are not supported"},
+	}
+
+	var buf bytes.Buffer
+	format := printer.Human
+	p := printer.NewPrinter(&format)
+	p.SetHumanOutput(&buf)
+	printIssuesGrouped(p, issues, "  ")
+
+	out := buf.String()
+	want := "  Errors:\n" +
+		"    VIRTUAL_TABLE fts: Virtual tables are not supported\n" +
+		"  Warnings:\n" +
+		"    AUTOINCREMENT (2): Will map to IDENTITY\n" +
+		"      notes.id, attachments.id\n" +
+		"  Info:\n" +
+		"    TEXT_UUID customers.id: will stay TEXT\n"
+	if out != want {
+		t.Fatalf("grouped output mismatch:\ngot:\n%s\nwant:\n%s", out, want)
+	}
+}
+
+func TestWrapListBreaksLongLocationLists(t *testing.T) {
+	items := []string{"aaaa.col", "bbbb.col", "cccc.col", "dddd.col"}
+	lines := wrapList(items, 20)
+	want := []string{"aaaa.col, bbbb.col,", "cccc.col, dddd.col"}
+	if len(lines) != len(want) {
+		t.Fatalf("lines = %v, want %v", lines, want)
+	}
+	for i := range want {
+		if lines[i] != want[i] {
+			t.Fatalf("line %d = %q, want %q", i, lines[i], want[i])
 		}
 	}
 }
