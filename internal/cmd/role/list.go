@@ -96,11 +96,12 @@ func ListCmd(ch *cmdutil.Helper) *cobra.Command {
 }
 
 type PostgresRoleList struct {
-	PublicID      string `header:"id" json:"id"`
-	Name          string `header:"name" json:"name"`
-	Username      string `header:"username" json:"username"`
-	AccessHostURL string `header:"access_host_url" json:"access_host_url"`
-	CreatedAt     string `header:"created_at" json:"created_at"`
+	PublicID        string `header:"id" json:"id"`
+	Name            string `header:"name" json:"name"`
+	Username        string `header:"username" json:"username"`
+	AccessHostURL   string `header:"access_host_url" json:"access_host_url"`
+	WithReplication bool   `header:"with_replication" json:"with_replication"`
+	CreatedAt       string `header:"created_at" json:"created_at"`
 
 	orig *ps.PostgresRole
 }
@@ -110,12 +111,13 @@ func toPostgresRoles(roles []*ps.PostgresRole) []*PostgresRoleList {
 
 	for _, role := range roles {
 		psRoles = append(psRoles, &PostgresRoleList{
-			PublicID:      role.ID,
-			Name:          role.Name,
-			Username:      role.Username,
-			AccessHostURL: role.AccessHostURL,
-			CreatedAt:     role.CreatedAt.Format("2006-01-02 15:04:05"),
-			orig:          role,
+			PublicID:        role.ID,
+			Name:            role.Name,
+			Username:        role.Username,
+			AccessHostURL:   role.AccessHostURL,
+			WithReplication: role.WithReplication,
+			CreatedAt:       role.CreatedAt.Format("2006-01-02 15:04:05"),
+			orig:            role,
 		})
 	}
 

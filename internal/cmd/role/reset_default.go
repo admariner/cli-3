@@ -110,25 +110,27 @@ func ResetDefaultCmd(ch *cmdutil.Helper) *cobra.Command {
 }
 
 type PostgresRole struct {
-	PublicID      string `header:"id" json:"id"`
-	Name          string `header:"name" json:"name"`
-	Username      string `header:"username" json:"username"`
-	Password      string `header:"password" json:"password"`
-	AccessHostURL string `header:"access_host_url" json:"access_host_url"`
-	DatabaseURL   string `header:"database_url" json:"database_url"`
+	PublicID        string `header:"id" json:"id"`
+	Name            string `header:"name" json:"name"`
+	Username        string `header:"username" json:"username"`
+	Password        string `header:"password" json:"password"`
+	AccessHostURL   string `header:"access_host_url" json:"access_host_url"`
+	DatabaseURL     string `header:"database_url" json:"database_url"`
+	WithReplication bool   `header:"with_replication" json:"with_replication"`
 
 	orig *ps.PostgresRole
 }
 
 func toPostgresRole(role *ps.PostgresRole) *PostgresRole {
 	return &PostgresRole{
-		PublicID:      role.ID,
-		Name:          role.Name,
-		Username:      role.Username,
-		Password:      role.Password,
-		AccessHostURL: role.AccessHostURL,
-		DatabaseURL:   buildPostgresConnectionURL(role.Username, role.Password, role.AccessHostURL),
-		orig:          role,
+		PublicID:        role.ID,
+		Name:            role.Name,
+		Username:        role.Username,
+		Password:        role.Password,
+		AccessHostURL:   role.AccessHostURL,
+		DatabaseURL:     buildPostgresConnectionURL(role.Username, role.Password, role.AccessHostURL),
+		WithReplication: role.WithReplication,
+		orig:            role,
 	}
 }
 
@@ -140,6 +142,14 @@ func printPostgresRoleCredentials(p *printer.Printer, role *PostgresRole) {
 	p.Printf("%-17s  %s\n", "PASSWORD", role.Password)
 	p.Printf("%-17s  %s\n", "ACCESS HOST URL", role.AccessHostURL)
 	p.Printf("%-17s  %s\n", "DATABASE URL", role.DatabaseURL)
+	p.Printf("%-17s  %s\n", "ATTRIBUTES", roleAttributes(role))
+}
+
+func roleAttributes(role *PostgresRole) string {
+	if role.WithReplication {
+		return "REPLICATION"
+	}
+	return "None"
 }
 
 // buildPostgresConnectionURL constructs a PostgreSQL connection URL from role credentials.
