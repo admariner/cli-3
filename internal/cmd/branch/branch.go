@@ -38,6 +38,7 @@ func BranchCmd(ch *cmdutil.Helper) *cobra.Command {
 	cmd.AddCommand(LintCmd(ch))
 	cmd.AddCommand(ConnectionsCmd(ch))
 	cmd.AddCommand(ProcesslistCmd(ch))
+	cmd.AddCommand(QueryPatternsCmd(ch))
 	cmd.AddCommand(vtctld.VtctldCmd(ch))
 	cmd.AddCommand(InfraCmd(ch))
 

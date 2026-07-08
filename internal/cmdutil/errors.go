@@ -18,7 +18,7 @@ var errExpiredAuthMessage = errors.New("the access token has expired. Please run
 // Error can be used by a command to change the exit status of the CLI.
 type Error struct {
 	Msg string
-	// Status
+	// ExitCode is returned to the shell when the command fails.
 	ExitCode int
 	// Handled suppresses Execute's stderr message when JSON was already printed to stdout.
 	Handled bool

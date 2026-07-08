@@ -42,6 +42,7 @@ import (
 	"github.com/planetscale/cli/internal/cmd/database"
 	"github.com/planetscale/cli/internal/cmd/dataimports"
 	"github.com/planetscale/cli/internal/cmd/deployrequest"
+	"github.com/planetscale/cli/internal/cmd/importcmd"
 	"github.com/planetscale/cli/internal/cmd/keyspace"
 	"github.com/planetscale/cli/internal/cmd/org"
 	"github.com/planetscale/cli/internal/cmd/password"
@@ -338,6 +339,10 @@ func runCmd(ctx context.Context, ver, commit, buildDate string, format *printer.
 	shellCmd := shell.ShellCmd(ch, sigc, signals...)
 	shellCmd.GroupID = "database"
 	rootCmd.AddCommand(shellCmd)
+
+	importCmd := importcmd.ImportCmd(ch)
+	importCmd.GroupID = "postgres"
+	rootCmd.AddCommand(importCmd)
 
 	sqlCmd := sql.SQLCmd(ch)
 	sqlCmd.GroupID = "database"
