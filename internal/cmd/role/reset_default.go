@@ -142,7 +142,14 @@ func printPostgresRoleCredentials(p *printer.Printer, role *PostgresRole) {
 	p.Printf("%-17s  %s\n", "PASSWORD", role.Password)
 	p.Printf("%-17s  %s\n", "ACCESS HOST URL", role.AccessHostURL)
 	p.Printf("%-17s  %s\n", "DATABASE URL", role.DatabaseURL)
-	p.Printf("%-17s  %t\n", "WITH REPLICATION", role.WithReplication)
+	p.Printf("%-17s  %s\n", "ATTRIBUTES", roleAttributes(role))
+}
+
+func roleAttributes(role *PostgresRole) string {
+	if role.WithReplication {
+		return "REPLICATION"
+	}
+	return "None"
 }
 
 // buildPostgresConnectionURL constructs a PostgreSQL connection URL from role credentials.
