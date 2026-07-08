@@ -49,14 +49,18 @@ func DownloadQueryPatternsCmd(ch *cmdutil.Helper) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			database, branch := args[0], args[1]
+			toStdout := flags.output == "-"
 
 			client, err := ch.Client()
 			if err != nil {
 				return err
 			}
 
-			end := ch.Printer.PrintProgress(fmt.Sprintf("Generating query patterns report for %s in %s...",
-				printer.BoldBlue(branch), printer.BoldBlue(database)))
+			end := func() {}
+			if !toStdout {
+				end = ch.Printer.PrintProgress(fmt.Sprintf("Generating query patterns report for %s in %s...",
+					printer.BoldBlue(branch), printer.BoldBlue(database)))
+			}
 			defer end()
 
 			report, err := client.QueryPatterns.CreateReport(ctx, &ps.CreateQueryPatternsReportRequest{
@@ -111,6 +115,13 @@ func DownloadQueryPatternsCmd(ch *cmdutil.Helper) *cobra.Command {
 			}
 			defer body.Close()
 
+			if toStdout {
+				if _, err := io.Copy(cmd.OutOrStdout(), body); err != nil {
+					return fmt.Errorf("writing query patterns report to stdout: %w", err)
+				}
+				return nil
+			}
+
 			f, err := os.Create(path)
 			if err != nil {
 				return fmt.Errorf("creating file %s: %w", path, err)
@@ -140,7 +151,7 @@ func DownloadQueryPatternsCmd(ch *cmdutil.Helper) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&flags.output, "output", "",
-		"Output file for the query patterns report. Defaults to the current directory as query-patterns-<organization>-<database>-<branch>-<timestamp>.csv.")
+		"Output file name, or - to write to stdout. Defaults to query-patterns-<organization>-<database>-<branch>-<timestamp>.csv.")
 
 	return cmd
 }
