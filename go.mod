@@ -14,6 +14,7 @@ require (
 	github.com/charmbracelet/huh v1.0.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/ansi v0.11.2
+	github.com/dustin/go-humanize v1.0.1
 	github.com/fatih/color v1.19.0
 	github.com/frankban/quicktest v1.14.6
 	github.com/go-sql-driver/mysql v1.9.3
@@ -31,7 +32,7 @@ require (
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/muesli/termenv v0.16.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
-	github.com/planetscale/planetscale-go v0.176.0
+	github.com/planetscale/planetscale-go v0.177.0
 	github.com/planetscale/psdb v0.0.0-20250717190954-65c6661ab6e4
 	github.com/planetscale/psdbproxy v0.0.0-20250728082226-3f4ea3a74ec7
 	github.com/spf13/cobra v1.10.2
@@ -68,7 +69,6 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.3.0 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
-	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/dvsekhvalnov/jose2go v1.8.0 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
