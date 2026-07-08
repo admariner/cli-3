@@ -1,12 +1,8 @@
 package cmdutil
 
-import (
-	"fmt"
-	"strings"
-)
+import "fmt"
 
-// Agent command strings for next_steps — flags go after the subcommand (not on
-// pscale root). Empty values render as <placeholder> for the agent to fill in.
+// Agent command strings for next_steps — flags go after the subcommand (not on pscale root).
 
 func AgentGuideCmd() string {
 	return "pscale agent-guide --format json"
@@ -25,62 +21,37 @@ func AgentOrgListCmd() string {
 }
 
 func AgentDatabaseListCmd(org string) string {
-	return fmt.Sprintf("pscale database list --org %s --format json", orPlaceholder(org, "<org>"))
+	if org == "" {
+		return "pscale database list --org <org> --format json"
+	}
+	return fmt.Sprintf("pscale database list --org %s --format json", org)
 }
 
 func AgentBranchListCmd(org, database string) string {
-	return fmt.Sprintf("pscale branch list %s --org %s --format json",
-		orPlaceholder(database, "<database>"), orPlaceholder(org, "<org>"))
+	if database == "" {
+		database = "<database>"
+	}
+	if org == "" {
+		return fmt.Sprintf("pscale branch list %s --org <org> --format json", database)
+	}
+	return fmt.Sprintf("pscale branch list %s --org %s --format json", database, org)
 }
 
 func AgentSQLCmd(org, database, branch string, force bool) string {
-	forceFlag, query := "", "SELECT 1"
+	if database == "" {
+		database = "<database>"
+	}
+	if branch == "" {
+		branch = "<branch>"
+	}
+	query := "SELECT 1"
+	forceFlag := ""
 	if force {
-		forceFlag, query = " --force", "<query>"
+		forceFlag = " --force"
+		query = "<query>"
 	}
-	return fmt.Sprintf("pscale sql %s %s --org %s --format json%s --query %q",
-		orPlaceholder(database, "<database>"), orPlaceholder(branch, "<branch>"),
-		orPlaceholder(org, "<org>"), forceFlag, query)
-}
-
-func AgentWorkflowListCmd(org, database string) string {
-	return fmt.Sprintf("pscale workflow list %s --org %s --format json",
-		orPlaceholder(database, "<database>"), orPlaceholder(org, "<org>"))
-}
-
-func AgentWorkflowShowCmd(org, database, number string) string {
-	return fmt.Sprintf("pscale workflow show %s %s --org %s --format json",
-		orPlaceholder(database, "<database>"), orPlaceholder(number, "<number>"),
-		orPlaceholder(org, "<org>"))
-}
-
-func AgentWorkflowCreateCmd(org, database, branch string) string {
-	return fmt.Sprintf("pscale workflow create %s %s --org %s --format json --source-keyspace <source> --target-keyspace <target> --tables <table>",
-		orPlaceholder(database, "<database>"), orPlaceholder(branch, "<branch>"),
-		orPlaceholder(org, "<org>"))
-}
-
-func AgentKeyspaceListCmd(org, database, branch string) string {
-	return fmt.Sprintf("pscale keyspace list %s %s --org %s --format json",
-		orPlaceholder(database, "<database>"), orPlaceholder(branch, "<branch>"),
-		orPlaceholder(org, "<org>"))
-}
-
-// AgentWorkflowActionCmd renders a workflow subcommand like cutover or cancel,
-// with extraFlags appended after --format json.
-func AgentWorkflowActionCmd(org, database, number, action string, extraFlags ...string) string {
-	flags := ""
-	if len(extraFlags) > 0 {
-		flags = " " + strings.Join(extraFlags, " ")
+	if org == "" {
+		return fmt.Sprintf("pscale sql %s %s --org <org> --format json%s --query \"%s\"", database, branch, forceFlag, query)
 	}
-	return fmt.Sprintf("pscale workflow %s %s %s --org %s --format json%s",
-		action, orPlaceholder(database, "<database>"), orPlaceholder(number, "<number>"),
-		orPlaceholder(org, "<org>"), flags)
-}
-
-func orPlaceholder(s, placeholder string) string {
-	if s == "" {
-		return placeholder
-	}
-	return s
+	return fmt.Sprintf("pscale sql %s %s --org %s --format json%s --query \"%s\"", database, branch, org, forceFlag, query)
 }

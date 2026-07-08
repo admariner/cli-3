@@ -19,17 +19,16 @@ func CompleteCmd(ch *cmdutil.Helper) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			db, num := args[0], args[1]
-			wfCtx := errorContext{Org: ch.Config.Organization, Database: db, Number: num}
 
 			client, err := ch.Client()
 			if err != nil {
-				return wfCtx.handle(ch, err)
+				return err
 			}
 
 			var number uint64
 			number, err = strconv.ParseUint(num, 10, 64)
 			if err != nil {
-				return wfCtx.handle(ch, err)
+				return err
 			}
 
 			end := ch.Printer.PrintProgress(fmt.Sprintf("Marking workflow %s in database %s as complete…", printer.BoldBlue(printer.Number(number)), printer.BoldBlue(db)))
@@ -43,10 +42,10 @@ func CompleteCmd(ch *cmdutil.Helper) *cobra.Command {
 			if err != nil {
 				switch cmdutil.ErrCode(err) {
 				case ps.ErrNotFound:
-					return wfCtx.handle(ch, fmt.Errorf("database %s or workflow %s does not exist in organization %s",
-						printer.BoldBlue(db), printer.BoldBlue(number), printer.BoldBlue(ch.Config.Organization)))
+					return fmt.Errorf("database %s or workflow %s does not exist in organization %s",
+						printer.BoldBlue(db), printer.BoldBlue(number), printer.BoldBlue(ch.Config.Organization))
 				default:
-					return wfCtx.handle(ch, cmdutil.HandleError(err))
+					return cmdutil.HandleError(err)
 				}
 			}
 			end()

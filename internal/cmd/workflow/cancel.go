@@ -26,26 +26,19 @@ marks it as cancelled, allowing you to start a new workflow if needed.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			db, num := args[0], args[1]
-			wfCtx := errorContext{Org: ch.Config.Organization, Database: db, Number: num}
 
 			client, err := ch.Client()
 			if err != nil {
-				return wfCtx.handle(ch, err)
+				return err
 			}
 
 			var number uint64
 			number, err = strconv.ParseUint(num, 10, 64)
 			if err != nil {
-				return wfCtx.handle(ch, err)
+				return err
 			}
 
 			if !force {
-				if ch.Printer.Format() == printer.JSON {
-					return wfCtx.reportConfirmationRequired(ch, "CANCEL_CONFIRMATION_REQUIRED",
-						"Cancel stops the workflow and marks it as cancelled",
-						cmdutil.AgentWorkflowActionCmd(wfCtx.Org, db, num, "cancel", "--force"))
-				}
-
 				if ch.Printer.Format() != printer.Human {
 					return fmt.Errorf(`cannot cancel workflow with the output format "%s" (run with --force to override)`, ch.Printer.Format())
 				}
@@ -85,10 +78,10 @@ marks it as cancelled, allowing you to start a new workflow if needed.`,
 			if err != nil {
 				switch cmdutil.ErrCode(err) {
 				case ps.ErrNotFound:
-					return wfCtx.handle(ch, fmt.Errorf("database %s or workflow %s does not exist in organization %s",
-						printer.BoldBlue(db), printer.BoldBlue(number), printer.BoldBlue(ch.Config.Organization)))
+					return fmt.Errorf("database %s or workflow %s does not exist in organization %s",
+						printer.BoldBlue(db), printer.BoldBlue(number), printer.BoldBlue(ch.Config.Organization))
 				default:
-					return wfCtx.handle(ch, cmdutil.HandleError(err))
+					return cmdutil.HandleError(err)
 				}
 			}
 			end()

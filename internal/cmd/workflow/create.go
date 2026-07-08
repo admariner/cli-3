@@ -34,19 +34,16 @@ func CreateCmd(ch *cmdutil.Helper) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			db, branch := args[0], args[1]
-			org := ch.Config.Organization
 
 			client, err := ch.Client()
 			if err != nil {
-				return errorContext{Org: org, Database: db, Branch: branch}.handle(ch, err)
+				return err
 			}
+
+			org := ch.Config.Organization
 
 			if flags.interactive {
 				return createInteractive(ctx, ch, org, db, branch, flags)
-			}
-
-			if err := validateCreateFlags(flags); err != nil {
-				return reportMissingCreateFlags(ch, org, db, branch, err)
 			}
 
 			end := ch.Printer.PrintProgress("Creating workflow…")
@@ -56,7 +53,7 @@ func CreateCmd(ch *cmdutil.Helper) *cobra.Command {
 			end()
 
 			if err != nil {
-				return errorContext{Org: org, Database: db, Branch: branch}.handle(ch, err)
+				return err
 			}
 
 			if ch.Printer.Format() == printer.Human {
@@ -112,23 +109,6 @@ func createWorkflow(ctx context.Context, client *ps.Client, org, db, branch stri
 	}
 
 	return workflow, nil
-}
-
-func validateCreateFlags(flags createFlags) error {
-	var missing []string
-	if flags.sourceKeyspace == "" {
-		missing = append(missing, "--source-keyspace")
-	}
-	if flags.targetKeyspace == "" {
-		missing = append(missing, "--target-keyspace")
-	}
-	if len(flags.tables) == 0 {
-		missing = append(missing, "--tables")
-	}
-	if len(missing) == 0 {
-		return nil
-	}
-	return fmt.Errorf("missing required flags: %s", strings.Join(missing, ", "))
 }
 
 func createInteractive(ctx context.Context, ch *cmdutil.Helper, org, db, branch string, flags createFlags) error {

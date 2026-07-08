@@ -91,36 +91,6 @@ func TestWorkflow_CutoverCmd(t *testing.T) {
 	c.Assert(buf.String(), qt.JSONEquals, expectedWorkflow)
 }
 
-func TestWorkflow_CutoverCmd_CSVWithoutForce(t *testing.T) {
-	c := qt.New(t)
-
-	var buf bytes.Buffer
-	format := printer.CSV
-	p := printer.NewPrinter(&format)
-	p.SetResourceOutput(&buf)
-
-	svc := &mock.WorkflowsService{}
-
-	ch := &cmdutil.Helper{
-		Printer: p,
-		Config: &config.Config{
-			Organization: "planetscale",
-		},
-		Client: func() (*ps.Client, error) {
-			return &ps.Client{
-				Workflows: svc,
-			}, nil
-		},
-	}
-
-	cmd := CutoverCmd(ch)
-	cmd.SetArgs([]string{"planetscale", "123"})
-	err := cmd.Execute()
-
-	c.Assert(err, qt.ErrorMatches, `cannot cutover with the output format "csv".*`)
-	c.Assert(svc.CutoverFnInvoked, qt.IsFalse)
-}
-
 func TestWorkflow_CutoverCmd_Error(t *testing.T) {
 	c := qt.New(t)
 

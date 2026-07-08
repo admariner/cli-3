@@ -22,11 +22,10 @@ func ListCmd(ch *cmdutil.Helper) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			db := args[0]
-			wfCtx := errorContext{Org: ch.Config.Organization, Database: db}
 
 			client, err := ch.Client()
 			if err != nil {
-				return wfCtx.handle(ch, err)
+				return err
 			}
 
 			end := ch.Printer.PrintProgress(fmt.Sprintf("Fetching workflows for database %s…", printer.BoldBlue(db)))
@@ -39,10 +38,10 @@ func ListCmd(ch *cmdutil.Helper) *cobra.Command {
 			if err != nil {
 				switch cmdutil.ErrCode(err) {
 				case ps.ErrNotFound:
-					return wfCtx.handle(ch, fmt.Errorf("database %s does not exist in organization %s",
-						printer.BoldBlue(db), printer.BoldBlue(ch.Config.Organization)))
+					return fmt.Errorf("database %s does not exist in organization %s",
+						printer.BoldBlue(db), printer.BoldBlue(ch.Config.Organization))
 				default:
-					return wfCtx.handle(ch, cmdutil.HandleError(err))
+					return cmdutil.HandleError(err)
 				}
 			}
 			end()
