@@ -15,9 +15,9 @@ import (
 	live "github.com/planetscale/cli/internal/connections"
 	"github.com/planetscale/cli/internal/connections/history"
 	"github.com/planetscale/cli/internal/connections/tui"
+	ps "github.com/planetscale/cli/internal/planetscale"
 	"github.com/planetscale/cli/internal/printer"
 	"github.com/planetscale/cli/internal/promptutil"
-	ps "github.com/planetscale/cli/internal/planetscale"
 	"github.com/spf13/cobra"
 )
 

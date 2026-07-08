@@ -19,8 +19,8 @@ import (
 	"github.com/planetscale/cli/internal/config"
 	live "github.com/planetscale/cli/internal/connections"
 	"github.com/planetscale/cli/internal/mock"
-	"github.com/planetscale/cli/internal/printer"
 	ps "github.com/planetscale/cli/internal/planetscale"
+	"github.com/planetscale/cli/internal/printer"
 	"github.com/spf13/cobra"
 )
 

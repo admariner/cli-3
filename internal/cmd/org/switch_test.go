@@ -11,9 +11,9 @@ import (
 	"github.com/planetscale/cli/internal/cmdutil"
 	"github.com/planetscale/cli/internal/config"
 	"github.com/planetscale/cli/internal/mock"
+	ps "github.com/planetscale/cli/internal/planetscale"
 	"github.com/planetscale/cli/internal/printer"
 	"github.com/planetscale/cli/internal/testutil"
-	ps "github.com/planetscale/cli/internal/planetscale"
 
 	qt "github.com/frankban/quicktest"
 )

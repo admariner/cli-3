@@ -14,9 +14,9 @@ import (
 
 	"github.com/planetscale/cli/internal/cmdutil"
 	"github.com/planetscale/cli/internal/passwordutil"
+	ps "github.com/planetscale/cli/internal/planetscale"
 	"github.com/planetscale/cli/internal/proxyutil"
 	"github.com/planetscale/cli/internal/roleutil"
-	ps "github.com/planetscale/cli/internal/planetscale"
 	"vitess.io/vitess/go/mysql"
 )
 

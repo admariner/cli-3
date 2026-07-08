@@ -10,9 +10,9 @@ import (
 
 // BranchInfrastructure represents the infrastructure (pods) for a branch.
 type BranchInfrastructure struct {
-	Type  string               `json:"type"`
-	Ready bool                 `json:"ready"`
-	Pods  []*BranchInfraPod    `json:"pods"`
+	Type  string            `json:"type"`
+	Ready bool              `json:"ready"`
+	Pods  []*BranchInfraPod `json:"pods"`
 }
 
 // BranchInfraPod represents a single pod in the branch infrastructure.

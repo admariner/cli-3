@@ -6,8 +6,8 @@ import (
 	"os"
 
 	"github.com/planetscale/cli/internal/cmdutil"
-	"github.com/planetscale/cli/internal/printer"
 	"github.com/planetscale/cli/internal/planetscale"
+	"github.com/planetscale/cli/internal/printer"
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/AlecAivazis/survey/v2/terminal"

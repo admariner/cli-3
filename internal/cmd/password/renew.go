@@ -5,8 +5,8 @@ import (
 	"strconv"
 
 	"github.com/planetscale/cli/internal/cmdutil"
-	"github.com/planetscale/cli/internal/printer"
 	ps "github.com/planetscale/cli/internal/planetscale"
+	"github.com/planetscale/cli/internal/printer"
 
 	"github.com/spf13/cobra"
 )

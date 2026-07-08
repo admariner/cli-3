@@ -14,9 +14,9 @@ import (
 	"github.com/planetscale/cli/internal/cmdutil"
 	"github.com/planetscale/cli/internal/dumper"
 	"github.com/planetscale/cli/internal/passwordutil"
+	ps "github.com/planetscale/cli/internal/planetscale"
 	"github.com/planetscale/cli/internal/printer"
 	"github.com/planetscale/cli/internal/proxyutil"
-	ps "github.com/planetscale/cli/internal/planetscale"
 
 	_ "github.com/go-sql-driver/mysql"
 

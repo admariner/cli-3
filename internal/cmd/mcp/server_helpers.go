@@ -11,9 +11,9 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/planetscale/cli/internal/cmdutil"
 	"github.com/planetscale/cli/internal/passwordutil"
+	"github.com/planetscale/cli/internal/planetscale"
 	"github.com/planetscale/cli/internal/proxyutil"
 	"github.com/planetscale/cli/internal/roleutil"
-	"github.com/planetscale/cli/internal/planetscale"
 	"github.com/planetscale/psdbproxy"
 	"vitess.io/vitess/go/mysql"
 )
