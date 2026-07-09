@@ -349,11 +349,24 @@ func (c *Client) handleResponse(ctx context.Context, res *http.Response, v inter
 			Message string `json:"message"`
 		}
 
+		statusErrCode := errorCodeForHTTPStatus(res.StatusCode)
 		errorRes := &errorResponse{}
 		err = json.Unmarshal(out, errorRes)
 		if err != nil {
 			var jsonErr *json.SyntaxError
 			if errors.As(err, &jsonErr) {
+				if statusErrCode != "" {
+					return &Error{
+						msg:  http.StatusText(res.StatusCode),
+						Code: statusErrCode,
+						Meta: map[string]string{
+							"body":        string(out),
+							"err":         jsonErr.Error(),
+							"http_status": http.StatusText(res.StatusCode),
+						},
+					}
+				}
+
 				return &Error{
 					msg:  "malformed error response body received",
 					Code: ErrResponseMalformed,
@@ -374,6 +387,17 @@ func (c *Client) handleResponse(ctx context.Context, res *http.Response, v inter
 		// they can debug the issue.
 		// TODO(fatih): fix the behavior on the API side
 		if *errorRes == (errorResponse{}) {
+			if statusErrCode != "" {
+				return &Error{
+					msg:  http.StatusText(res.StatusCode),
+					Code: statusErrCode,
+					Meta: map[string]string{
+						"body":        string(out),
+						"http_status": http.StatusText(res.StatusCode),
+					},
+				}
+			}
+
 			return &Error{
 				msg:  "internal error, response body doesn't match error type signature",
 				Code: ErrInternal,
@@ -394,6 +418,9 @@ func (c *Client) handleResponse(ctx context.Context, res *http.Response, v inter
 			errCode = ErrInvalid
 		case "unprocessable":
 			errCode = ErrRetry
+		}
+		if errCode == "" {
+			errCode = statusErrCode
 		}
 
 		return &Error{
@@ -495,6 +522,15 @@ type serviceTokenTransport struct {
 	rt        http.RoundTripper
 	token     string
 	tokenName string
+}
+
+func errorCodeForHTTPStatus(statusCode int) ErrorCode {
+	switch statusCode {
+	case http.StatusNotFound:
+		return ErrNotFound
+	default:
+		return ""
+	}
 }
 
 func (t *serviceTokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {

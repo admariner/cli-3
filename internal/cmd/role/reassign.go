@@ -24,6 +24,11 @@ func ReassignCmd(ch *cmdutil.Helper) *cobra.Command {
 		Use:   "reassign <database> <branch> <role-id>",
 		Short: "Reassign objects owned by a role to another role",
 		Args:  cmdutil.RequiredArgs("database", "branch", "role-id"),
+		Example: `  # List roles and copy the source role's id value
+  pscale role list mydb main --org my-org
+
+  # Reassign objects owned by role tq8hnwl1mlty to successor role pscale_api_stqrbvtoy367
+  pscale role reassign mydb main tq8hnwl1mlty --successor pscale_api_stqrbvtoy367 --org my-org`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			database := args[0]
@@ -89,8 +94,8 @@ func ReassignCmd(ch *cmdutil.Helper) *cobra.Command {
 					return cmdutil.HandleNotFoundWithServiceTokenCheck(
 						ctx, cmd, ch.Config, ch.Client, err,
 						"delete_branch_password or delete_production_branch_password",
-						"role %s does not exist in branch %s of database %s (organization: %s)",
-						printer.BoldBlue(roleID), printer.BoldBlue(branch), printer.BoldBlue(database), printer.BoldBlue(ch.Config.Organization))
+						"role %s does not exist in branch %s of database %s (organization: %s)\n\nRun `pscale role list %s %s --org %s` and use the value from the `id` column for <role-id>. Do not use the generated Postgres username from the `username` column.",
+						printer.BoldBlue(roleID), printer.BoldBlue(branch), printer.BoldBlue(database), printer.BoldBlue(ch.Config.Organization), database, branch, ch.Config.Organization)
 				default:
 					return cmdutil.HandleError(err)
 				}
@@ -116,7 +121,7 @@ func ReassignCmd(ch *cmdutil.Helper) *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&flags.force, "force", false, "Reassign objects without confirmation")
-	cmd.Flags().StringVar(&flags.successor, "successor", "", "Role to transfer ownership to (required)")
+	cmd.Flags().StringVar(&flags.successor, "successor", "", "Successor role to transfer ownership to (required)")
 	cmd.MarkFlagRequired("successor") // nolint:errcheck
 
 	return cmd
