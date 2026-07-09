@@ -27,6 +27,8 @@ cross-repo step entirely.
   wait for and no version to bump.
 - Do **not** add `github.com/planetscale/planetscale-go` back to `go.mod`,
   and do not update the planetscale-go repo as a prerequisite for CLI work.
+  A test (`TestNoPlanetscaleGoDependency` in `internal/planetscale/`) fails
+  the build if the module shows up in `go.mod` or in any import.
 - Service interfaces (e.g. `DatabasesService`) live next to their
   implementations; hand-written mocks are in `internal/mock/` and must be
   updated when an interface changes, same as before.
