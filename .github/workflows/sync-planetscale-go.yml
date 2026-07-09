@@ -1,4 +1,4 @@
-name: Mirror client to planetscale-go
+name: Sync client to planetscale-go
 
 # The API client at internal/planetscale is canonical (see doc/api-client.md).
 # This workflow copies it into planetscale/planetscale-go and opens a PR there
@@ -21,7 +21,7 @@ permissions:
   contents: read
 
 jobs:
-  mirror:
+  sync:
     runs-on: ubuntu-latest
     # The CLI app credentials (CLI_APP_ID, CLI_APP_PRIVATE_KEY) are scoped to
     # the release environment.
@@ -55,7 +55,7 @@ jobs:
           go-version-file: cli/go.mod
 
       - name: Sync client files
-        run: ./cli/script/mirror-planetscale-go.sh cli planetscale-go
+        run: ./cli/script/sync-planetscale-go.sh cli planetscale-go
 
       - name: Check for changes
         id: changes
@@ -69,7 +69,7 @@ jobs:
             git diff --stat
           fi
 
-      - name: Build and test mirrored copy
+      - name: Build and test synced copy
         if: steps.changes.outputs.changed == 'true'
         working-directory: planetscale-go
         run: |
@@ -77,13 +77,13 @@ jobs:
           go build ./...
           go test ./...
 
-      - name: Commit to mirror branch
+      - name: Commit to sync branch
         if: steps.changes.outputs.changed == 'true'
         id: commit
         working-directory: planetscale-go
         run: |
           source_sha=$(git -C ../cli rev-parse --short HEAD)
-          branch="mirror-cli-${source_sha}"
+          branch="sync-cli-${source_sha}"
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
           if git ls-remote --exit-code origin "refs/heads/$branch" > /dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
@@ -95,7 +95,7 @@ jobs:
           git config user.email "272331943+planetscale-cli[bot]@users.noreply.github.com"
           git checkout -b "$branch"
           git add -A
-          git commit -m "Mirror API client from planetscale/cli@${source_sha}"
+          git commit -m "Sync API client from planetscale/cli@${source_sha}"
 
       - name: API compatibility report
         if: steps.changes.outputs.changed == 'true' && steps.commit.outputs.exists == 'false'
@@ -123,7 +123,7 @@ jobs:
           branch="${{ steps.commit.outputs.branch }}"
           git push origin "$branch"
           {
-            echo "Automated mirror of the API client from planetscale/cli@${source_sha}."
+            echo "Automated sync of the API client from planetscale/cli@${source_sha}."
             echo
             echo "The client in the cli repo (internal/planetscale) is the source of"
             echo "truth; this repo is a read-only mirror for external module users."
@@ -136,5 +136,5 @@ jobs:
           gh pr create \
             --repo planetscale/planetscale-go \
             --head "$branch" \
-            --title "Mirror API client from cli@${source_sha}" \
+            --title "Sync API client from cli@${source_sha}" \
             --body-file /tmp/pr-body.md

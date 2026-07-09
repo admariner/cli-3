@@ -35,18 +35,18 @@ cross-repo step entirely.
 - The client's `User-Agent` starts with `pscale-cli/<version>`, set by the
   CLI at startup via `planetscale.WithUserAgent` (see `internal/cmd/root.go`).
   `WithUserAgent` keeps upstream's prepend semantics so the package stays
-  byte-identical to what the mirror publishes (see below); the full header
+  byte-identical to what the sync publishes (see below); the full header
   is `pscale-cli/<version> planetscale-go/unknown`.
 - Keep this package self-contained: do not import other CLI packages from
-  `internal/planetscale/`. The mirrored copy must build against
+  `internal/planetscale/`. The synced copy must build against
   planetscale-go's own minimal `go.mod`.
-- Only public (`v1/...`) endpoints are mirrored to planetscale-go. If the
+- Only public (`v1/...`) endpoints are synced to planetscale-go. If the
   CLI needs an internal (non-v1) endpoint, put the whole service in a
-  `*_internal.go` file (tests in `*_internal_test.go`); the mirror script
+  `*_internal.go` file (tests in `*_internal_test.go`); the sync script
   skips those. Internal services must not be wired into the `Client`
-  struct in `client.go`, since that file is mirrored: expose them via a
-  method or constructor defined in the internal file itself. If a mirrored
-  file accidentally references an internal symbol, the mirror workflow's
+  struct in `client.go`, since that file is synced: expose them via a
+  method or constructor defined in the internal file itself. If a synced
+  file accidentally references an internal symbol, the sync workflow's
   standalone build fails, so mistakes cannot ship silently.
   (`d1_import_notifications.go` predates this rule: it hits an internal
   endpoint but is already published in planetscale-go, so it stays.)
@@ -57,10 +57,12 @@ The public planetscale-go module still exists for external users, but it
 is now a read-only mirror of this package. The CLI copy is the source of
 truth; do not make client changes in the planetscale-go repo.
 
-The mirror is the `Mirror client to planetscale-go` workflow
-(`.github/workflows/mirror-planetscale-go.yml`). It runs on CLI releases
+The sync is the `Sync client to planetscale-go` workflow
+(`.github/workflows/sync-planetscale-go.yml`), which uses
+`script/sync-planetscale-go.sh`. It runs on CLI releases
 or manually, copies `internal/planetscale/` into planetscale-go (minus
-`doc.go` and `dependency_test.go`, which are CLI-only), builds and tests
+`doc.go`, `dependency_test.go`, and `*_internal.go` files, which are
+CLI-only), builds and tests
 the copy standalone, and opens a PR there with a `gorelease` API
 compatibility report. It never pushes to main: a human reviews the PR and
 picks the next tag, bumping the major version if the report shows

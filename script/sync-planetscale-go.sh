@@ -1,12 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
-# Mirrors the vendored API client (internal/planetscale) into a checkout of
+# Syncs the vendored API client (internal/planetscale) into a checkout of
 # planetscale/planetscale-go. The CLI copy is the source of truth; the
 # planetscale-go repo is a read-only mirror for external users. See
 # doc/api-client.md.
 
-usage="usage: mirror-planetscale-go.sh <cli checkout> <planetscale-go checkout>"
+usage="usage: sync-planetscale-go.sh <cli checkout> <planetscale-go checkout>"
 CLI_DIR=${1:?$usage}
 DEST_DIR=${2:?$usage}
 
