@@ -32,12 +32,27 @@ cross-repo step entirely.
 - Service interfaces (e.g. `DatabasesService`) live next to their
   implementations; hand-written mocks are in `internal/mock/` and must be
   updated when an interface changes, same as before.
-- The client's `User-Agent` is `pscale-cli/<version>`, set by the CLI at
-  startup via `planetscale.WithUserAgent` (see `internal/cmd/root.go`).
-  There is no separate library version anymore.
+- The client's `User-Agent` starts with `pscale-cli/<version>`, set by the
+  CLI at startup via `planetscale.WithUserAgent` (see `internal/cmd/root.go`).
+  `WithUserAgent` keeps upstream's prepend semantics so the package stays
+  byte-identical to what the mirror publishes (see below); the full header
+  is `pscale-cli/<version> planetscale-go/unknown`.
+- Keep this package self-contained: do not import other CLI packages from
+  `internal/planetscale/`. The mirrored copy must build against
+  planetscale-go's own minimal `go.mod`.
 
 ## The planetscale-go repository
 
-The public planetscale-go SDK still exists for external users, but this
-repo does not consume it and changes there do not affect the CLI. Its
-future (maintenance mode, archive, etc.) is tracked separately.
+The public planetscale-go module still exists for external users, but it
+is now a read-only mirror of this package. The CLI copy is the source of
+truth; do not make client changes in the planetscale-go repo.
+
+The mirror is the `Mirror client to planetscale-go` workflow
+(`.github/workflows/mirror-planetscale-go.yml`). It runs on CLI releases
+or manually, copies `internal/planetscale/` into planetscale-go (minus
+`doc.go` and `dependency_test.go`, which are CLI-only), builds and tests
+the copy standalone, and opens a PR there with a `gorelease` API
+compatibility report. It never pushes to main: a human reviews the PR and
+picks the next tag, bumping the major version if the report shows
+incompatible changes. The workflow needs a `MIRROR_PLANETSCALE_GO_TOKEN`
+secret with push and PR access to planetscale-go.

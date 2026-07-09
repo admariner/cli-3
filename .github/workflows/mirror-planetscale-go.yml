@@ -1,0 +1,121 @@
+name: Mirror client to planetscale-go
+
+# The API client at internal/planetscale is canonical (see doc/api-client.md).
+# This workflow copies it into planetscale/planetscale-go and opens a PR there
+# so external users of the module can pick up new endpoints. It never pushes
+# to main directly: a human reviews the PR, including the gorelease API report,
+# and decides the version to tag.
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out cli
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          path: cli
+
+      - name: Check out planetscale-go
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: planetscale/planetscale-go
+          token: ${{ secrets.MIRROR_PLANETSCALE_GO_TOKEN }}
+          path: planetscale-go
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: cli/go.mod
+
+      - name: Sync client files
+        run: ./cli/script/mirror-planetscale-go.sh cli planetscale-go
+
+      - name: Check for changes
+        id: changes
+        working-directory: planetscale-go
+        run: |
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "planetscale-go is already up to date"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff --stat
+          fi
+
+      - name: Build and test mirrored copy
+        if: steps.changes.outputs.changed == 'true'
+        working-directory: planetscale-go
+        run: |
+          go mod tidy
+          go build ./...
+          go test ./...
+
+      - name: Commit to mirror branch
+        if: steps.changes.outputs.changed == 'true'
+        id: commit
+        working-directory: planetscale-go
+        run: |
+          source_sha=$(git -C ../cli rev-parse --short HEAD)
+          branch="mirror-cli-${source_sha}"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code origin "refs/heads/$branch" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Branch $branch already exists, nothing to do"
+            exit 0
+          fi
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+          git config user.name "planetscale-actions-bot"
+          git config user.email "actions-bot@planetscale.com"
+          git checkout -b "$branch"
+          git add -A
+          git commit -m "Mirror API client from planetscale/cli@${source_sha}"
+
+      - name: API compatibility report
+        if: steps.changes.outputs.changed == 'true' && steps.commit.outputs.exists == 'false'
+        working-directory: planetscale-go
+        run: |
+          # gorelease requires a clean tree, hence running after the commit.
+          go install golang.org/x/exp/cmd/gorelease@latest
+          base=$(git describe --tags --abbrev=0)
+          echo "Comparing against $base"
+          {
+            echo '## gorelease report (base: '"$base"')'
+            echo '```'
+            gorelease -base="$base" 2>&1 || true
+            echo '```'
+          } > /tmp/gorelease-report.md
+          cat /tmp/gorelease-report.md
+
+      - name: Open pull request
+        if: steps.changes.outputs.changed == 'true' && steps.commit.outputs.exists == 'false'
+        working-directory: planetscale-go
+        env:
+          GH_TOKEN: ${{ secrets.MIRROR_PLANETSCALE_GO_TOKEN }}
+        run: |
+          source_sha=$(git -C ../cli rev-parse --short HEAD)
+          branch="${{ steps.commit.outputs.branch }}"
+          git push origin "$branch"
+          {
+            echo "Automated mirror of the API client from planetscale/cli@${source_sha}."
+            echo
+            echo "The client in the cli repo (internal/planetscale) is the source of"
+            echo "truth; this repo is a read-only mirror for external module users."
+            echo
+            echo "Review the API report below before merging. If it lists incompatible"
+            echo "changes, the next tag needs to reflect that."
+            echo
+            cat /tmp/gorelease-report.md
+          } > /tmp/pr-body.md
+          gh pr create \
+            --repo planetscale/planetscale-go \
+            --head "$branch" \
+            --title "Mirror API client from cli@${source_sha}" \
+            --body-file /tmp/pr-body.md
