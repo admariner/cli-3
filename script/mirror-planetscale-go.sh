@@ -21,8 +21,10 @@ fi
 rm -f "$DEST"/*.go
 cp "$SRC"/*.go "$DEST"/
 
-# CLI-only files: the package doc describing the vendoring, and the test
-# that guards against the CLI depending on the planetscale-go module.
-rm -f "$DEST/doc.go" "$DEST/dependency_test.go"
+# CLI-only files: the package doc describing the vendoring, the test that
+# guards against the CLI depending on the planetscale-go module, and
+# internal (non-v1) API endpoints, which stay out of the public module.
+# See doc/api-client.md.
+rm -f "$DEST/doc.go" "$DEST/dependency_test.go" "$DEST"/*_internal.go "$DEST"/*_internal_test.go
 
 echo "Synced $(ls "$DEST"/*.go | wc -l | tr -d ' ') files into $DEST"

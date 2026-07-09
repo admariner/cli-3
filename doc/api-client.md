@@ -40,6 +40,16 @@ cross-repo step entirely.
 - Keep this package self-contained: do not import other CLI packages from
   `internal/planetscale/`. The mirrored copy must build against
   planetscale-go's own minimal `go.mod`.
+- Only public (`v1/...`) endpoints are mirrored to planetscale-go. If the
+  CLI needs an internal (non-v1) endpoint, put the whole service in a
+  `*_internal.go` file (tests in `*_internal_test.go`); the mirror script
+  skips those. Internal services must not be wired into the `Client`
+  struct in `client.go`, since that file is mirrored: expose them via a
+  method or constructor defined in the internal file itself. If a mirrored
+  file accidentally references an internal symbol, the mirror workflow's
+  standalone build fails, so mistakes cannot ship silently.
+  (`d1_import_notifications.go` predates this rule: it hits an internal
+  endpoint but is already published in planetscale-go, so it stays.)
 
 ## The planetscale-go repository
 
