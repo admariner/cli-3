@@ -13,9 +13,6 @@ on:
   workflow_dispatch:
   release:
     types: [published]
-  # Temporary trigger to test the workflow before it lands on main.
-  push:
-    branches: ["remove-planetscale-go-dependancy"]
 
 permissions:
   contents: read
