@@ -1,11 +1,13 @@
 package d1
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -261,9 +263,11 @@ func querySQLiteDistribution(ctx context.Context, sqlitePath, query string) (boo
 		if parts[i] == "" || parts[i] == "NULL" {
 			continue
 		}
-		if _, err := fmt.Sscanf(parts[i], "%d", ptr); err != nil {
-			return booleanDistribution{}, err
+		n, err := strconv.ParseInt(parts[i], 10, 64)
+		if err != nil {
+			return booleanDistribution{}, fmt.Errorf("boolean distribution: unexpected count %q", parts[i])
 		}
+		*ptr = n
 	}
 	return dist, nil
 }
@@ -365,9 +369,9 @@ func shouldFingerprintPKSum(table TableSchema, pkCol string, all []TableSchema, 
 func tableFingerprintFromSQLite(ctx context.Context, sqlitePath string, table TableSchema, pkCol string, all []TableSchema, coerceCtx *TypeCoercionContext) (tableFingerprint, error) {
 	var query string
 	if pkCol != "" && shouldFingerprintPKSum(table, pkCol, all, coerceCtx) {
-		query = fmt.Sprintf(`SELECT COUNT(*), COALESCE(CAST(SUM(CAST(%q AS INTEGER)) AS TEXT), '0') FROM %q;`, pkCol, table.Name)
+		query = fmt.Sprintf(`SELECT COUNT(*), COALESCE(CAST(SUM(CAST(%s AS INTEGER)) AS TEXT), '0') FROM %s;`, quoteSQLiteIdentifier(pkCol), quoteSQLiteIdentifier(table.Name))
 	} else {
-		query = fmt.Sprintf(`SELECT COUNT(*), '0' FROM %q;`, table.Name)
+		query = fmt.Sprintf(`SELECT COUNT(*), '0' FROM %s;`, quoteSQLiteIdentifier(table.Name))
 	}
 	sqlite3, err := FindSQLite3()
 	if err != nil {
@@ -382,9 +386,11 @@ func tableFingerprintFromSQLite(ctx context.Context, sqlitePath string, table Ta
 	if len(fields) < 2 {
 		return tableFingerprint{}, fmt.Errorf("sqlite fingerprint %s: unexpected output %q", table.Name, string(out))
 	}
-	if _, err := fmt.Sscanf(fields[0], "%d", &fp.RowCount); err != nil {
-		return tableFingerprint{}, fmt.Errorf("sqlite fingerprint %s row count: %w", table.Name, err)
+	rowCount, err := strconv.ParseInt(fields[0], 10, 64)
+	if err != nil {
+		return tableFingerprint{}, fmt.Errorf("sqlite fingerprint %s: unexpected row count %q", table.Name, fields[0])
 	}
+	fp.RowCount = rowCount
 	fp.IDSum = fields[1]
 	return fp, nil
 }
@@ -472,7 +478,7 @@ func samplePrimaryKeys(ctx context.Context, sqlitePath, table, pkCol string, lim
 	if err != nil {
 		return nil, err
 	}
-	query := fmt.Sprintf(`SELECT %q FROM %q ORDER BY %q LIMIT %d;`, pkCol, table, pkCol, limit)
+	query := fmt.Sprintf(`SELECT %s FROM %s ORDER BY %s LIMIT %d;`, quoteSQLiteIdentifier(pkCol), quoteSQLiteIdentifier(table), quoteSQLiteIdentifier(pkCol), limit)
 	out, err := runSQLiteQuery(ctx, sqlite3, sqlitePath, query)
 	if err != nil {
 		return nil, err
@@ -489,19 +495,20 @@ func samplePrimaryKeys(ctx context.Context, sqlitePath, table, pkCol string, lim
 }
 
 func sqliteSignatureColumnExpr(col ColumnSchema, table TableSchema, coerceCtx *TypeCoercionContext) string {
+	name := quoteSQLiteIdentifier(col.Name)
 	if isBooleanLikeColumn(col, table, coerceCtx) {
-		return fmt.Sprintf(`CASE WHEN %q IN (1, '1') THEN '1' WHEN %q IN (0, '0') THEN '0' ELSE '' END`, col.Name, col.Name)
+		return fmt.Sprintf(`CASE WHEN %s IN (1, '1') THEN '1' WHEN %s IN (0, '0') THEN '0' ELSE '' END`, name, name)
 	}
 	if isJSONText(col) && coerceCtx != nil && samplesAllowJSON(table.Name, col.Name, coerceCtx) {
-		return fmt.Sprintf(`COALESCE(json(%q), CAST(%q AS TEXT), '')`, col.Name, col.Name)
+		return fmt.Sprintf(`COALESCE(json(%s), CAST(%s AS TEXT), '')`, name, name)
 	}
 	if isBlobColumn(col) {
-		return fmt.Sprintf(`COALESCE(hex(%q), '')`, col.Name)
+		return fmt.Sprintf(`COALESCE(hex(%s), '')`, name)
 	}
 	if isTimestampText(col) && coerceCtx != nil && samplesAllowTimestamp(table.Name, col.Name, coerceCtx) {
-		return fmt.Sprintf(`COALESCE(strftime('%%Y-%%m-%%dT%%H:%%M:%%SZ', %q), COALESCE(CAST(%q AS TEXT), ''))`, col.Name, col.Name)
+		return fmt.Sprintf(`COALESCE(strftime('%%Y-%%m-%%dT%%H:%%M:%%SZ', %s), COALESCE(CAST(%s AS TEXT), ''))`, name, name)
 	}
-	return fmt.Sprintf(`COALESCE(CAST(%q AS TEXT), '')`, col.Name)
+	return fmt.Sprintf(`COALESCE(CAST(%s AS TEXT), '')`, name)
 }
 
 func postgresSignatureColumnExpr(col ColumnSchema, table TableSchema, all []TableSchema, coerceCtx *TypeCoercionContext) string {
@@ -693,6 +700,13 @@ func postgresRowSignature(ctx context.Context, db *sql.DB, table TableSchema, pk
 	return sig.String, nil
 }
 
+// quoteSQLiteIdentifier double-quotes an identifier, escaping embedded double
+// quotes. Go's %q is not valid SQL quoting for names containing quotes or
+// backslashes.
+func quoteSQLiteIdentifier(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
 func sqliteLiteral(val string) string {
 	if val != "" && isSQLiteIntegerLiteral(val) {
 		return val
@@ -715,11 +729,15 @@ func isSQLiteIntegerLiteral(val string) bool {
 	return true
 }
 
+// runSQLiteQuery returns sqlite3's stdout. Stderr is kept out of the result
+// (warnings there would corrupt parsing) and reported only on failure.
 func runSQLiteQuery(ctx context.Context, sqlite3, sqlitePath, query string) ([]byte, error) {
-	cmd := execabs.CommandContext(ctx, sqlite3, sqlitePath, query)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+	cmd := execabs.CommandContext(ctx, sqlite3, sqliteCLIArgs(sqlitePath, query)...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
 	}
-	return out, nil
+	return stdout.Bytes(), nil
 }
