@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/99designs/keyring"
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 
 	"github.com/mitchellh/go-homedir"
 	exec "golang.org/x/sys/execabs"

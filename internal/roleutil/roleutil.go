@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 )
 
 // Options represents the options to create a new Postgres role

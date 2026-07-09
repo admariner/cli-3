@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 )
 
 const importNotifyTimeout = 3 * time.Second

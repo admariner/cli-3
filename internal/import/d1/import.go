@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 
 	"github.com/planetscale/cli/internal/postgres"
 	"github.com/planetscale/cli/internal/roleutil"

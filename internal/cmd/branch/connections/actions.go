@@ -7,8 +7,8 @@ import (
 
 	"github.com/planetscale/cli/internal/cmdutil"
 	live "github.com/planetscale/cli/internal/connections"
+	ps "github.com/planetscale/cli/internal/planetscale"
 	"github.com/planetscale/cli/internal/printer"
-	ps "github.com/planetscale/planetscale-go/planetscale"
 )
 
 type actionResult struct {

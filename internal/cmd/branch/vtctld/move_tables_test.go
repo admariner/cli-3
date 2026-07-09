@@ -12,8 +12,8 @@ import (
 	"github.com/planetscale/cli/internal/cmdutil"
 	"github.com/planetscale/cli/internal/config"
 	"github.com/planetscale/cli/internal/mock"
+	ps "github.com/planetscale/cli/internal/planetscale"
 	"github.com/planetscale/cli/internal/printer"
-	ps "github.com/planetscale/planetscale-go/planetscale"
 )
 
 func moveTablesTestHelper(org string, moveTables ps.MoveTablesService, vtctld ps.VtctldService, buf *bytes.Buffer) *cmdutil.Helper {

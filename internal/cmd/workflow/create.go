@@ -10,7 +10,7 @@ import (
 	"github.com/planetscale/cli/internal/printer"
 	"github.com/spf13/cobra"
 
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 )
 
 type createFlags struct {

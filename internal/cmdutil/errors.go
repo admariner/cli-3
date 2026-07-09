@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/planetscale/planetscale-go/planetscale"
+	"github.com/planetscale/cli/internal/planetscale"
 )
 
 const (

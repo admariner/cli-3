@@ -59,7 +59,7 @@ import (
 	"github.com/planetscale/cli/internal/printer"
 	"github.com/planetscale/cli/internal/update"
 
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"

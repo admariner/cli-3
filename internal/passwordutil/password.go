@@ -8,7 +8,7 @@ import (
 	nanoid "github.com/matoous/go-nanoid/v2"
 
 	"github.com/planetscale/cli/internal/cmdutil"
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 )
 
 const (

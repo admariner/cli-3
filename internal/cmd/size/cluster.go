@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/planetscale/cli/internal/cmdutil"
-	"github.com/planetscale/planetscale-go/planetscale"
+	"github.com/planetscale/cli/internal/planetscale"
 	"github.com/spf13/cobra"
 )
 

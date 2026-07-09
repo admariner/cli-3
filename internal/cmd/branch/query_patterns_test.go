@@ -16,8 +16,8 @@ import (
 
 	"github.com/planetscale/cli/internal/cmdutil"
 	"github.com/planetscale/cli/internal/config"
+	ps "github.com/planetscale/cli/internal/planetscale"
 	"github.com/planetscale/cli/internal/printer"
-	ps "github.com/planetscale/planetscale-go/planetscale"
 )
 
 const queryPatternsCSV = "normalized_sql,query_count\nselect ?,10\n"

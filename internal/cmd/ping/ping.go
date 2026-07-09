@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/planetscale/cli/internal/cmdutil"
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"golang.org/x/exp/constraints"

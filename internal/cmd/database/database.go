@@ -7,7 +7,7 @@ import (
 	"github.com/planetscale/cli/internal/cmdutil"
 	"github.com/spf13/cobra"
 
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 )
 
 // DatabaseCmd encapsulates the commands for creating a database

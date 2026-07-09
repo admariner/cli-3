@@ -12,7 +12,7 @@ import (
 	"github.com/planetscale/cli/internal/printer"
 
 	qt "github.com/frankban/quicktest"
-	ps "github.com/planetscale/planetscale-go/planetscale"
+	ps "github.com/planetscale/cli/internal/planetscale"
 )
 
 func TestDeployRequest_CloseCmd(t *testing.T) {

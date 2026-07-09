@@ -7,8 +7,8 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/planetscale/cli/internal/cmdutil"
+	"github.com/planetscale/cli/internal/planetscale"
 	"github.com/planetscale/cli/internal/printer"
-	"github.com/planetscale/planetscale-go/planetscale"
 
 	"github.com/spf13/cobra"
 )

@@ -10,9 +10,9 @@ import (
 	"github.com/planetscale/cli/internal/cmdutil"
 	"github.com/planetscale/cli/internal/dumper"
 	"github.com/planetscale/cli/internal/passwordutil"
+	ps "github.com/planetscale/cli/internal/planetscale"
 	"github.com/planetscale/cli/internal/printer"
 	"github.com/planetscale/cli/internal/proxyutil"
-	ps "github.com/planetscale/planetscale-go/planetscale"
 
 	"github.com/spf13/cobra"
 

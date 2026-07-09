@@ -1,5 +1,9 @@
 # PlanetScale CLI — agent guide
 
+> **Developing the CLI?** The API client is vendored at `internal/planetscale/`;
+> this repo **no longer depends on `planetscale-go`**. Read `doc/api-client.md`
+> before touching API-facing code. The rest of this file is about *using* `pscale`.
+
 For **any** automated agent or script using `pscale`. Always pass **`--format json`**. Substitute placeholders from the user's request or from prior command output (`org list`, `database list`, `branch list`).
 
 If you only have the installed `pscale` binary, start here:

@@ -10,8 +10,8 @@ import (
 	psauth "github.com/planetscale/cli/internal/auth"
 	"github.com/planetscale/cli/internal/cmdutil"
 	"github.com/planetscale/cli/internal/config"
+	"github.com/planetscale/cli/internal/planetscale"
 	"github.com/planetscale/cli/internal/printer"
-	"github.com/planetscale/planetscale-go/planetscale"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"

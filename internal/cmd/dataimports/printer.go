@@ -3,8 +3,8 @@ package dataimports
 import (
 	"strings"
 
+	ps "github.com/planetscale/cli/internal/planetscale"
 	"github.com/planetscale/cli/internal/printer"
-	ps "github.com/planetscale/planetscale-go/planetscale"
 )
 
 func PrintDataImport(p *printer.Printer, di ps.DataImport) {

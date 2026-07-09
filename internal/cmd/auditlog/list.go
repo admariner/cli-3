@@ -5,8 +5,8 @@ import (
 	"net/url"
 
 	"github.com/planetscale/cli/internal/cmdutil"
+	ps "github.com/planetscale/cli/internal/planetscale"
 	"github.com/planetscale/cli/internal/printer"
-	ps "github.com/planetscale/planetscale-go/planetscale"
 
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"

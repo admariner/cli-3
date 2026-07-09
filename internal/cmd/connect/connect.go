@@ -14,10 +14,10 @@ import (
 
 	"github.com/planetscale/cli/internal/cmdutil"
 	"github.com/planetscale/cli/internal/passwordutil"
+	"github.com/planetscale/cli/internal/planetscale"
 	"github.com/planetscale/cli/internal/printer"
 	"github.com/planetscale/cli/internal/promptutil"
 	"github.com/planetscale/cli/internal/proxyutil"
-	"github.com/planetscale/planetscale-go/planetscale"
 
 	"github.com/mattn/go-shellwords"
 	"github.com/spf13/cobra"
