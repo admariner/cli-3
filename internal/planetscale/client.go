@@ -5,10 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"runtime/debug"
 	"strconv"
+	"sync"
 
 	"github.com/hashicorp/go-cleanhttp"
 	"golang.org/x/oauth2"
@@ -36,7 +39,7 @@ type Client struct {
 	// client represents the HTTP client used for making HTTP requests.
 	client *http.Client
 
-	// UserAgent identifies the CLI version making the request
+	// UserAgent is the version of the planetscale-go library that is being used
 	UserAgent string
 
 	// headers are used to override request headers for every single HTTP request
@@ -170,14 +173,25 @@ func WithPerPage(perPage int) ListOption {
 // ClientOption provides a variadic option for configuring the client
 type ClientOption func(c *Client) error
 
-// The CLI always overrides this with its real version via WithUserAgent;
-// the fallback only shows up when the client is constructed directly (tests).
-const defaultUserAgent = "pscale-cli/unknown"
+var defaultUserAgent = sync.OnceValue(func() string {
+	libraryVersion := "unknown"
+	buildInfo, ok := debug.ReadBuildInfo()
+	if ok {
+		for _, dep := range buildInfo.Deps {
+			if dep.Path == "github.com/planetscale/planetscale-go" {
+				libraryVersion = dep.Version
+				break
+			}
+		}
+	}
+
+	return "planetscale-go/" + libraryVersion
+})
 
 // WithUserAgent overrides the User-Agent header.
 func WithUserAgent(userAgent string) ClientOption {
 	return func(c *Client) error {
-		c.UserAgent = userAgent
+		c.UserAgent = fmt.Sprintf("%s %s", userAgent, c.UserAgent)
 		return nil
 	}
 }
@@ -264,7 +278,7 @@ func NewClient(opts ...ClientOption) (*Client, error) {
 	c := &Client{
 		client:    cleanhttp.DefaultClient(),
 		baseURL:   baseURL,
-		UserAgent: defaultUserAgent,
+		UserAgent: defaultUserAgent(),
 		headers:   make(map[string]string, 0),
 	}
 

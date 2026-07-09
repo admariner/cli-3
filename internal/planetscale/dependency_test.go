@@ -1,6 +1,8 @@
 package planetscale
 
 import (
+	"go/parser"
+	"go/token"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -10,12 +12,7 @@ import (
 
 // The API client is vendored in this package; the CLI must not depend on
 // the external planetscale-go module again. See doc/api-client.md.
-//
-// The strings are split so this file does not match its own checks.
-const (
-	bannedModule = "github.com/planetscale/" + "planetscale-go"
-	bannedImport = `"` + bannedModule
-)
+const bannedModule = "github.com/planetscale/planetscale-go"
 
 func TestNoPlanetscaleGoDependency(t *testing.T) {
 	root := filepath.Join("..", "..")
@@ -28,6 +25,7 @@ func TestNoPlanetscaleGoDependency(t *testing.T) {
 		t.Errorf("go.mod requires %s; the API client is vendored at internal/planetscale and that module must not come back. See doc/api-client.md", bannedModule)
 	}
 
+	fset := token.NewFileSet()
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -45,12 +43,15 @@ func TestNoPlanetscaleGoDependency(t *testing.T) {
 		if !strings.HasSuffix(path, ".go") {
 			return nil
 		}
-		data, err := os.ReadFile(path)
+		f, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
 		if err != nil {
 			return err
 		}
-		if strings.Contains(string(data), bannedImport) {
-			t.Errorf("%s imports %s; use github.com/planetscale/cli/internal/planetscale instead. See doc/api-client.md", path, bannedModule)
+		for _, imp := range f.Imports {
+			importPath := strings.Trim(imp.Path.Value, `"`)
+			if importPath == bannedModule || strings.HasPrefix(importPath, bannedModule+"/") {
+				t.Errorf("%s imports %s; use github.com/planetscale/cli/internal/planetscale instead. See doc/api-client.md", path, importPath)
+			}
 		}
 		return nil
 	})
