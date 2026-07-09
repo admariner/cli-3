@@ -54,5 +54,5 @@ or manually, copies `internal/planetscale/` into planetscale-go (minus
 the copy standalone, and opens a PR there with a `gorelease` API
 compatibility report. It never pushes to main: a human reviews the PR and
 picks the next tag, bumping the major version if the report shows
-incompatible changes. The workflow needs a `MIRROR_PLANETSCALE_GO_TOKEN`
-secret with push and PR access to planetscale-go.
+incompatible changes. Auth comes from the CLI GitHub App (the same one
+release.yml uses), which must be installed on planetscale-go.

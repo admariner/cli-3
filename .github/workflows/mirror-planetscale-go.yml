@@ -5,6 +5,9 @@ name: Mirror client to planetscale-go
 # so external users of the module can pick up new endpoints. It never pushes
 # to main directly: a human reviews the PR, including the gorelease API report,
 # and decides the version to tag.
+#
+# Auth comes from the CLI GitHub App (same as release.yml); the app must be
+# installed on planetscale-go with contents and pull request write access.
 
 on:
   workflow_dispatch:
@@ -18,6 +21,16 @@ jobs:
   mirror:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        id: app-token
+        with:
+          app-id: ${{ vars.CLI_APP_ID }}
+          private-key: ${{ secrets.CLI_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          owner: planetscale
+          repositories: planetscale-go
+
       - name: Check out cli
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -27,7 +40,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: planetscale/planetscale-go
-          token: ${{ secrets.MIRROR_PLANETSCALE_GO_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           path: planetscale-go
 
       - name: Set up Go
@@ -72,8 +85,8 @@ jobs:
             exit 0
           fi
           echo "exists=false" >> "$GITHUB_OUTPUT"
-          git config user.name "planetscale-actions-bot"
-          git config user.email "actions-bot@planetscale.com"
+          git config user.name "planetscale-cli[bot]"
+          git config user.email "272331943+planetscale-cli[bot]@users.noreply.github.com"
           git checkout -b "$branch"
           git add -A
           git commit -m "Mirror API client from planetscale/cli@${source_sha}"
@@ -98,7 +111,7 @@ jobs:
         if: steps.changes.outputs.changed == 'true' && steps.commit.outputs.exists == 'false'
         working-directory: planetscale-go
         env:
-          GH_TOKEN: ${{ secrets.MIRROR_PLANETSCALE_GO_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           source_sha=$(git -C ../cli rev-parse --short HEAD)
           branch="${{ steps.commit.outputs.branch }}"
