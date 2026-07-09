@@ -2,7 +2,11 @@ package d1
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os/exec"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/planetscale/cli/internal/postgres"
@@ -193,15 +197,19 @@ func countSQLiteRowsWithProgress(ctx context.Context, opts VerifyOptions, sqlite
 			Total:   len(tables),
 			Detail:  table + " (sqlite)",
 		})
-		query := fmt.Sprintf("SELECT COUNT(*) FROM %q;", table)
-		cmd := execabs.CommandContext(ctx, sqlite3, sqlitePath, query)
+		query := fmt.Sprintf("SELECT COUNT(*) FROM %s;", quoteSQLiteIdentifier(table))
+		cmd := execabs.CommandContext(ctx, sqlite3, sqliteCLIArgs(sqlitePath, query)...)
 		out, err := cmd.Output()
 		if err != nil {
+			var ee *exec.ExitError
+			if errors.As(err, &ee) && len(ee.Stderr) > 0 {
+				return nil, fmt.Errorf("sqlite count %s: %w: %s", table, err, truncateLoadError(strings.TrimSpace(string(ee.Stderr)), 200))
+			}
 			return nil, fmt.Errorf("sqlite count %s: %w", table, err)
 		}
-		var count int64
-		if _, err := fmt.Sscanf(string(out), "%d", &count); err != nil {
-			return nil, err
+		count, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("sqlite count %s: unexpected output %q", table, truncateLoadError(string(out), 120))
 		}
 		counts[table] = count
 	}

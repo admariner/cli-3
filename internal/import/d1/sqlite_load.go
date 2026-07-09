@@ -156,7 +156,7 @@ func loadSQLiteDumpChunked(ctx context.Context, sqlite3, dumpPath, sqlitePath st
 		chunkFile = nil
 
 		readPath := strings.ReplaceAll(chunkPath, "'", "''")
-		cmd := execabs.CommandContext(ctx, sqlite3, sqlitePath, fmt.Sprintf(".read %s", readPath))
+		cmd := execabs.CommandContext(ctx, sqlite3, sqliteCLIArgs(sqlitePath, fmt.Sprintf(".read %s", readPath))...)
 		var stderr bytes.Buffer
 		cmd.Stdout = io.Discard
 		cmd.Stderr = &stderr
