@@ -48,6 +48,7 @@ func MoveTablesCreateCmd(ch *cmdutil.Helper) *cobra.Command {
 		deferSecondaryKeys           bool
 		onDDL                        string
 		shardedAutoIncrementHandling string
+		globalKeyspace               string
 		sourceTimeZone               string
 		tenantID                     string
 		cells                        []string
@@ -84,6 +85,7 @@ func MoveTablesCreateCmd(ch *cmdutil.Helper) *cobra.Command {
 				Tables:                       flags.tables,
 				OnDDL:                        flags.onDDL,
 				ShardedAutoIncrementHandling: flags.shardedAutoIncrementHandling,
+				GlobalKeyspace:               flags.globalKeyspace,
 				SourceTimeZone:               flags.sourceTimeZone,
 				TenantID:                     flags.tenantID,
 				Cells:                        flags.cells,
@@ -132,6 +134,7 @@ func MoveTablesCreateCmd(ch *cmdutil.Helper) *cobra.Command {
 	cmd.Flags().BoolVar(&flags.deferSecondaryKeys, "defer-secondary-keys", true, "Defer secondary keys during the copy phase")
 	cmd.Flags().StringVar(&flags.onDDL, "on-ddl", "", "DDL handling strategy (IGNORE, STOP, EXEC, EXEC_IGNORE)")
 	cmd.Flags().StringVar(&flags.shardedAutoIncrementHandling, "sharded-auto-increment-handling", "", "Auto increment handling for sharded keyspaces")
+	cmd.Flags().StringVar(&flags.globalKeyspace, "global-keyspace", "", "Unsharded keyspace in which to create the backing sequence tables when --sharded-auto-increment-handling is REPLACE")
 	cmd.Flags().StringVar(&flags.sourceTimeZone, "source-time-zone", "", "Source time zone")
 	cmd.Flags().StringVar(&flags.tenantID, "tenant-id", "", "Tenant ID")
 	cmd.Flags().StringSliceVar(&flags.cells, "cells", nil, "Cells to restrict the workflow to (comma-separated)")
