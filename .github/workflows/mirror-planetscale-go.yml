@@ -23,6 +23,9 @@ permissions:
 jobs:
   mirror:
     runs-on: ubuntu-latest
+    # The CLI app credentials (CLI_APP_ID, CLI_APP_PRIVATE_KEY) are scoped to
+    # the release environment.
+    environment: release
     steps:
       - uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
         id: app-token
