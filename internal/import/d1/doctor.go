@@ -222,3 +222,13 @@ func FindSQLite3() (string, error) {
 	}
 	return path, nil
 }
+
+// sqliteCLIArgs builds sqlite3 arguments that isolate the run from user
+// configuration. The sqlite3 shell loads ~/.sqliterc even for one-shot
+// invocations (found via the passwd database, so $HOME overrides don't help);
+// settings like `.headers on` or `.mode column` change the output format and
+// break parsing. -init with an empty file suppresses the rc file, -batch and
+// -noheader force plain list output.
+func sqliteCLIArgs(dbPath string, args ...string) []string {
+	return append([]string{"-batch", "-noheader", "-init", os.DevNull, dbPath}, args...)
+}
