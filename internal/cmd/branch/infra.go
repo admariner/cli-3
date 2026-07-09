@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/dustin/go-humanize"
 	"github.com/planetscale/cli/internal/cmdutil"
 	ps "github.com/planetscale/cli/internal/planetscale"
 	"github.com/planetscale/cli/internal/printer"
@@ -74,6 +75,67 @@ func toInfraPods(pods []*ps.BranchInfraPod) []*InfraPod {
 	return result
 }
 
+type PostgresInfraRow struct {
+	Component string `header:"component" json:"component"`
+	Role      string `header:"role" json:"role"`
+	Size      string `header:"size" json:"size"`
+	AZ        string `header:"az" json:"az"`
+	Storage   string `header:"storage" json:"storage"`
+	Name      string `header:"name" json:"name"`
+
+	orig any
+}
+
+func (r *PostgresInfraRow) MarshalJSON() ([]byte, error) {
+	return json.MarshalIndent(r.orig, "", "  ")
+}
+
+func (r *PostgresInfraRow) MarshalCSVValue() interface{} {
+	return []*PostgresInfraRow{r}
+}
+
+func toPostgresInfraRows(pg *ps.PostgresBranchInfrastructure) []*PostgresInfraRow {
+	rows := make([]*PostgresInfraRow, 0, len(pg.Nodes)+len(pg.Bouncers))
+
+	for _, node := range pg.Nodes {
+		storage := "-"
+		if node.VolumeUsageBytes != nil && node.VolumeCapacityBytes != nil {
+			storage = fmt.Sprintf("%s / %s",
+				humanize.IBytes(uint64(*node.VolumeUsageBytes)),
+				humanize.IBytes(uint64(*node.VolumeCapacityBytes)))
+		}
+
+		rows = append(rows, &PostgresInfraRow{
+			Component: "postgres",
+			Role:      node.Role,
+			Size:      node.ClusterDisplayName,
+			AZ:        node.AvailabilityZone,
+			Storage:   storage,
+			Name:      node.Name,
+			orig:      node,
+		})
+	}
+
+	for _, bouncer := range pg.Bouncers {
+		size := "-"
+		if bouncer.SKU != nil {
+			size = bouncer.SKU.DisplayName
+		}
+
+		rows = append(rows, &PostgresInfraRow{
+			Component: "pgbouncer",
+			Role:      bouncer.Target,
+			Size:      size,
+			AZ:        "-",
+			Storage:   "-",
+			Name:      bouncer.Name,
+			orig:      bouncer,
+		})
+	}
+
+	return rows
+}
+
 func humanAge(d time.Duration) string {
 	if d < time.Minute {
 		return fmt.Sprintf("%ds", int(d.Seconds()))
@@ -137,12 +199,25 @@ func InfraCmd(ch *cmdutil.Helper) *cobra.Command {
 
 			end()
 
-			if len(infra.Pods) == 0 && ch.Printer.Format() == printer.Human {
-				ch.Printer.Printf("No pods found for branch %s.\n", printer.BoldBlue(branch))
-				return nil
-			}
+			switch {
+			case infra.Postgres != nil:
+				rows := toPostgresInfraRows(infra.Postgres)
+				if len(rows) == 0 && ch.Printer.Format() == printer.Human {
+					ch.Printer.Printf("No nodes found for branch %s.\n", printer.BoldBlue(branch))
+					return nil
+				}
 
-			return ch.Printer.PrintResource(toInfraPods(infra.Pods))
+				return ch.Printer.PrintResource(rows)
+			case infra.Vitess != nil:
+				if len(infra.Vitess.Pods) == 0 && ch.Printer.Format() == printer.Human {
+					ch.Printer.Printf("No pods found for branch %s.\n", printer.BoldBlue(branch))
+					return nil
+				}
+
+				return ch.Printer.PrintResource(toInfraPods(infra.Vitess.Pods))
+			default:
+				return fmt.Errorf("unexpected infrastructure response for branch %s", branch)
+			}
 		},
 	}
 
