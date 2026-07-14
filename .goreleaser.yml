@@ -16,6 +16,9 @@ builds:
       - CC=o64-clang
       - CXX=o64-clang++
       - CGO_ENABLED=1
+      # ld64 only sets SG_READ_ONLY on __DATA_CONST when targeting >= 10.15;
+      # macOS 26 dyld refuses to load binaries without it. Go requires 11+ anyway.
+      - MACOSX_DEPLOYMENT_TARGET=11.0
     main: ./cmd/pscale/main.go
     ldflags:
       - -s -w -X main.version={{.Version}} -X main.commit={{.ShortCommit}} -X main.date={{.Date}}
@@ -31,6 +34,7 @@ builds:
       - CC=oa64-clang
       - CXX=oa64-clang++
       - CGO_ENABLED=1
+      - MACOSX_DEPLOYMENT_TARGET=11.0
     main: ./cmd/pscale/main.go
     ldflags:
       - -s -w -X main.version={{.Version}} -X main.commit={{.ShortCommit}} -X main.date={{.Date}}
