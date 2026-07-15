@@ -13,6 +13,11 @@ import (
 
 // ListCmd encapsulates the command for listing passwords for a branch.
 func ListCmd(ch *cmdutil.Helper) *cobra.Command {
+	var flags struct {
+		page    int
+		perPage int
+	}
+
 	cmd := &cobra.Command{
 		Use:     "list <database> [branch]",
 		Short:   "List all passwords of a database",
@@ -52,40 +57,29 @@ func ListCmd(ch *cmdutil.Helper) *cobra.Command {
 			end := ch.Printer.PrintProgress(fmt.Sprintf("Fetching passwords for %s", forMsg))
 			defer end()
 
-			var allPasswords []*planetscale.DatabaseBranchPassword
-			page := 1
-			perPage := 100
-
-			for {
-				passwords, err := client.Passwords.List(ctx, &planetscale.ListDatabaseBranchPasswordRequest{
-					Organization: ch.Config.Organization,
-					Database:     database,
-					Branch:       branch,
-				}, planetscale.WithPage(page), planetscale.WithPerPage(perPage))
-				if err != nil {
-					switch cmdutil.ErrCode(err) {
-					case planetscale.ErrNotFound:
-						return fmt.Errorf("branch %s does not exist in database %s (organization: %s)",
-							printer.BoldBlue(branch), printer.BoldBlue(database), printer.BoldBlue(ch.Config.Organization))
-					default:
-						return cmdutil.HandleError(err)
-					}
+			passwords, err := client.Passwords.List(ctx, &planetscale.ListDatabaseBranchPasswordRequest{
+				Organization: ch.Config.Organization,
+				Database:     database,
+				Branch:       branch,
+			}, planetscale.WithPage(flags.page), planetscale.WithPerPage(flags.perPage))
+			if err != nil {
+				switch cmdutil.ErrCode(err) {
+				case planetscale.ErrNotFound:
+					return fmt.Errorf("branch %s does not exist in database %s (organization: %s)",
+						printer.BoldBlue(branch), printer.BoldBlue(database), printer.BoldBlue(ch.Config.Organization))
+				default:
+					return cmdutil.HandleError(err)
 				}
-
-				allPasswords = append(allPasswords, passwords...)
-
-				// Check if there are more pages - if we got fewer results than perPage, we're done
-				if len(passwords) < perPage {
-					break
-				}
-				page++
 			}
 
-			passwords := allPasswords
 			end()
 
 			if len(passwords) == 0 && ch.Printer.Format() == printer.Human {
-				ch.Printer.Printf("No passwords exist in %s.\n", forMsg)
+				if flags.page == 0 {
+					ch.Printer.Printf("No passwords exist in %s.\n", forMsg)
+				} else {
+					ch.Printer.Println("No passwords found on this page.")
+				}
 				return nil
 			}
 
@@ -100,5 +94,7 @@ func ListCmd(ch *cmdutil.Helper) *cobra.Command {
 	}
 
 	cmd.Flags().BoolP("web", "w", false, "List passwords in your web browser.")
+	cmd.Flags().IntVar(&flags.page, "page", 0, "Page number to fetch")
+	cmd.Flags().IntVar(&flags.perPage, "per-page", 100, "Number of results per page")
 	return cmd
 }

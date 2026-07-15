@@ -48,8 +48,7 @@ func DeleteCmd(ch *cmdutil.Helper) *cobra.Command {
 				end := ch.Printer.PrintProgress(fmt.Sprintf("Finding password %s in %s/%s",
 					printer.BoldBlue(name), printer.BoldBlue(database), printer.BoldBlue(branch)))
 
-				// Fetch all passwords to find the one with matching name
-				var allPasswords []*ps.DatabaseBranchPassword
+				var foundPassword *ps.DatabaseBranchPassword
 				page := 1
 				perPage := 100
 
@@ -70,25 +69,20 @@ func DeleteCmd(ch *cmdutil.Helper) *cobra.Command {
 						}
 					}
 
-					allPasswords = append(allPasswords, passwords...)
+					for _, password := range passwords {
+						if password.Name == name {
+							foundPassword = password
+							break
+						}
+					}
 
-					// Check if there are more pages
-					if len(passwords) < perPage {
+					if foundPassword != nil || len(passwords) < perPage {
 						break
 					}
 					page++
 				}
 
 				end()
-
-				// Find password with matching name
-				var foundPassword *ps.DatabaseBranchPassword
-				for _, password := range allPasswords {
-					if password.Name == name {
-						foundPassword = password
-						break
-					}
-				}
 
 				if foundPassword == nil {
 					return fmt.Errorf("password with name %s does not exist in branch %s of %s (organization: %s)",

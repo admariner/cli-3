@@ -3,6 +3,7 @@ package branch
 import (
 	"bytes"
 	"context"
+	"net/url"
 	"testing"
 
 	"github.com/planetscale/cli/internal/cmdutil"
@@ -13,6 +14,14 @@ import (
 	qt "github.com/frankban/quicktest"
 	ps "github.com/planetscale/cli/internal/planetscale"
 )
+
+func listQueryParam(opts []ps.ListOption, key string) string {
+	lo := &ps.ListOptions{URLValues: &url.Values{}}
+	for _, opt := range opts {
+		_ = opt(lo)
+	}
+	return lo.URLValues.Get(key)
+}
 
 func TestBranch_ListCmd(t *testing.T) {
 	c := qt.New(t)
@@ -35,6 +44,8 @@ func TestBranch_ListCmd(t *testing.T) {
 		ListFn: func(ctx context.Context, req *ps.ListDatabaseBranchesRequest, opts ...ps.ListOption) ([]*ps.DatabaseBranch, error) {
 			c.Assert(req.Database, qt.Equals, db)
 			c.Assert(req.Organization, qt.Equals, org)
+			c.Assert(listQueryParam(opts, "per_page"), qt.Equals, "100")
+			c.Assert(listQueryParam(opts, "page"), qt.Equals, "")
 
 			return branches, nil
 		},
@@ -151,6 +162,8 @@ func TestBranch_ListCmd_PostgreSQL(t *testing.T) {
 		ListFn: func(ctx context.Context, req *ps.ListPostgresBranchesRequest, opts ...ps.ListOption) ([]*ps.PostgresBranch, error) {
 			c.Assert(req.Database, qt.Equals, db)
 			c.Assert(req.Organization, qt.Equals, org)
+			c.Assert(listQueryParam(opts, "per_page"), qt.Equals, "100")
+			c.Assert(listQueryParam(opts, "page"), qt.Equals, "")
 
 			return branches, nil
 		},

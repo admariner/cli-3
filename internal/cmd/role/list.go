@@ -13,6 +13,11 @@ import (
 
 // ListCmd encapsulates the command for listing roles for a branch.
 func ListCmd(ch *cmdutil.Helper) *cobra.Command {
+	var flags struct {
+		page    int
+		perPage int
+	}
+
 	cmd := &cobra.Command{
 		Use:     "list <database> <branch>",
 		Short:   "List all roles for a Postgres database branch",
@@ -47,43 +52,32 @@ func ListCmd(ch *cmdutil.Helper) *cobra.Command {
 			end := ch.Printer.PrintProgress(fmt.Sprintf("Fetching roles for %s", forMsg))
 			defer end()
 
-			var allRoles []*ps.PostgresRole
-			page := 1
-			perPage := 100
-
-			for {
-				roles, err := client.PostgresRoles.List(ctx, &ps.ListPostgresRolesRequest{
-					Organization: ch.Config.Organization,
-					Database:     database,
-					Branch:       branch,
-				}, ps.WithPage(page), ps.WithPerPage(perPage))
-				if err != nil {
-					switch cmdutil.ErrCode(err) {
-					case ps.ErrNotFound:
-						return cmdutil.HandleNotFoundWithServiceTokenCheck(
-							ctx, cmd, ch.Config, ch.Client, err,
-							"read_branch",
-							"database %s or branch %s does not exist in organization %s",
-							printer.BoldBlue(database), printer.BoldBlue(branch), printer.BoldBlue(ch.Config.Organization))
-					default:
-						return cmdutil.HandleError(err)
-					}
+			roles, err := client.PostgresRoles.List(ctx, &ps.ListPostgresRolesRequest{
+				Organization: ch.Config.Organization,
+				Database:     database,
+				Branch:       branch,
+			}, ps.WithPage(flags.page), ps.WithPerPage(flags.perPage))
+			if err != nil {
+				switch cmdutil.ErrCode(err) {
+				case ps.ErrNotFound:
+					return cmdutil.HandleNotFoundWithServiceTokenCheck(
+						ctx, cmd, ch.Config, ch.Client, err,
+						"read_branch",
+						"database %s or branch %s does not exist in organization %s",
+						printer.BoldBlue(database), printer.BoldBlue(branch), printer.BoldBlue(ch.Config.Organization))
+				default:
+					return cmdutil.HandleError(err)
 				}
-
-				allRoles = append(allRoles, roles...)
-
-				// Check if there are more pages - if we got fewer results than perPage, we're done
-				if len(roles) < perPage {
-					break
-				}
-				page++
 			}
 
-			roles := allRoles
 			end()
 
 			if len(roles) == 0 && ch.Printer.Format() == printer.Human {
-				ch.Printer.Printf("No roles exist in %s.\n", forMsg)
+				if flags.page == 0 {
+					ch.Printer.Printf("No roles exist in %s.\n", forMsg)
+				} else {
+					ch.Printer.Println("No roles found on this page.")
+				}
 				return nil
 			}
 
@@ -92,6 +86,8 @@ func ListCmd(ch *cmdutil.Helper) *cobra.Command {
 	}
 
 	cmd.Flags().BoolP("web", "w", false, "List roles in your web browser.")
+	cmd.Flags().IntVar(&flags.page, "page", 0, "Page number to fetch")
+	cmd.Flags().IntVar(&flags.perPage, "per-page", 100, "Number of results per page")
 	return cmd
 }
 

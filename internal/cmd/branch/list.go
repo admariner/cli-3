@@ -13,6 +13,11 @@ import (
 
 // ListCmd encapsulates the command for listing branches for a database.
 func ListCmd(ch *cmdutil.Helper) *cobra.Command {
+	var flags struct {
+		page    int
+		perPage int
+	}
+
 	cmd := &cobra.Command{
 		Use:     "list <database>",
 		Short:   "List all branches of a database",
@@ -65,89 +70,69 @@ func ListCmd(ch *cmdutil.Helper) *cobra.Command {
 			}
 
 			if db.Kind == "mysql" {
-				var allBranches []*planetscale.DatabaseBranch
-				page := 1
-				perPage := 100
-
-				for {
-					branches, err := client.DatabaseBranches.List(ctx, &planetscale.ListDatabaseBranchesRequest{
-						Organization: ch.Config.Organization,
-						Database:     database,
-					}, planetscale.WithPage(page), planetscale.WithPerPage(perPage))
-					if err != nil {
-						switch cmdutil.ErrCode(err) {
-						case planetscale.ErrNotFound:
-							return cmdutil.HandleNotFoundWithServiceTokenCheck(
-								ctx, cmd, ch.Config, ch.Client, err, "read_branch",
-								"database %s does not exist in organization %s",
-								printer.BoldBlue(database), printer.BoldBlue(ch.Config.Organization))
-						default:
-							return cmdutil.HandleError(err)
-						}
+				branches, err := client.DatabaseBranches.List(ctx, &planetscale.ListDatabaseBranchesRequest{
+					Organization: ch.Config.Organization,
+					Database:     database,
+				}, planetscale.WithPage(flags.page), planetscale.WithPerPage(flags.perPage))
+				if err != nil {
+					switch cmdutil.ErrCode(err) {
+					case planetscale.ErrNotFound:
+						return cmdutil.HandleNotFoundWithServiceTokenCheck(
+							ctx, cmd, ch.Config, ch.Client, err, "read_branch",
+							"database %s does not exist in organization %s",
+							printer.BoldBlue(database), printer.BoldBlue(ch.Config.Organization))
+					default:
+						return cmdutil.HandleError(err)
 					}
-
-					allBranches = append(allBranches, branches...)
-
-					// Check if there are more pages - if we got fewer results than perPage, we're done
-					if len(branches) < perPage {
-						break
-					}
-					page++
 				}
 
-				branches := allBranches
 				end()
 
 				if len(branches) == 0 && ch.Printer.Format() == printer.Human {
-					ch.Printer.Printf("No branches exist in %s.\n", printer.BoldBlue(database))
+					if flags.page == 0 {
+						ch.Printer.Printf("No branches exist in %s.\n", printer.BoldBlue(database))
+					} else {
+						ch.Printer.Println("No branches found on this page.")
+					}
 					return nil
 				}
 
 				return ch.Printer.PrintResource(toDatabaseBranches(branches))
-			} else {
-				var allBranches []*planetscale.PostgresBranch
-				page := 1
-				perPage := 100
-
-				for {
-					branches, err := client.PostgresBranches.List(ctx, &planetscale.ListPostgresBranchesRequest{
-						Organization: ch.Config.Organization,
-						Database:     database,
-					}, planetscale.WithPage(page), planetscale.WithPerPage(perPage))
-					if err != nil {
-						switch cmdutil.ErrCode(err) {
-						case planetscale.ErrNotFound:
-							return cmdutil.HandleNotFoundWithServiceTokenCheck(
-								ctx, cmd, ch.Config, ch.Client, err, "read_branch",
-								"database %s does not exist in organization %s",
-								printer.BoldBlue(database), printer.BoldBlue(ch.Config.Organization))
-						default:
-							return cmdutil.HandleError(err)
-						}
-					}
-
-					allBranches = append(allBranches, branches...)
-
-					// Check if there are more pages - if we got fewer results than perPage, we're done
-					if len(branches) < perPage {
-						break
-					}
-					page++
-				}
-
-				branches := allBranches
-				end()
-
-				if len(branches) == 0 && ch.Printer.Format() == printer.Human {
-					ch.Printer.Printf("No branches exist in %s.\n", printer.BoldBlue(database))
-					return nil
-				}
-
-				return ch.Printer.PrintResource(toPostgresBranches(branches))
 			}
+
+			branches, err := client.PostgresBranches.List(ctx, &planetscale.ListPostgresBranchesRequest{
+				Organization: ch.Config.Organization,
+				Database:     database,
+			}, planetscale.WithPage(flags.page), planetscale.WithPerPage(flags.perPage))
+			if err != nil {
+				switch cmdutil.ErrCode(err) {
+				case planetscale.ErrNotFound:
+					return cmdutil.HandleNotFoundWithServiceTokenCheck(
+						ctx, cmd, ch.Config, ch.Client, err, "read_branch",
+						"database %s does not exist in organization %s",
+						printer.BoldBlue(database), printer.BoldBlue(ch.Config.Organization))
+				default:
+					return cmdutil.HandleError(err)
+				}
+			}
+
+			end()
+
+			if len(branches) == 0 && ch.Printer.Format() == printer.Human {
+				if flags.page == 0 {
+					ch.Printer.Printf("No branches exist in %s.\n", printer.BoldBlue(database))
+				} else {
+					ch.Printer.Println("No branches found on this page.")
+				}
+				return nil
+			}
+
+			return ch.Printer.PrintResource(toPostgresBranches(branches))
 		},
 	}
 
 	cmd.Flags().BoolP("web", "w", false, "List branches in your web browser.")
+	cmd.Flags().IntVar(&flags.page, "page", 0, "Page number to fetch")
+	cmd.Flags().IntVar(&flags.perPage, "per-page", 100, "Number of results per page")
 	return cmd
 }
