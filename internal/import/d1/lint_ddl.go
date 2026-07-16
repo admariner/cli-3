@@ -131,12 +131,11 @@ func indexColumnsLookExpression(columns string) bool {
 		return true
 	}
 	for _, part := range splitCommaList(columns) {
-		part = strings.TrimSpace(part)
-		part = strings.Trim(part, "`\"'[]")
-		if part == "" {
+		name := cleanIndexedColumnName(part)
+		if name == "" {
 			continue
 		}
-		if !simpleIndexColumnName(part) {
+		if !simpleIndexColumnName(name) {
 			return true
 		}
 	}

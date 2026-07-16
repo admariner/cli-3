@@ -62,6 +62,43 @@ func TestConvertIndexDDLSkipsPartialIndex(t *testing.T) {
 	}
 }
 
+// Bug 19: index columns with ASC/DESC/NULLS/COLLATE modifiers were misclassified as
+// expression indexes and dropped entirely, including the UNIQUE constraint they carried.
+func TestIndexColumnsLookExpressionToleratesSortModifiers(t *testing.T) {
+	cases := map[string]bool{
+		"email":                    false,
+		"email DESC":               false,
+		"email ASC":                false,
+		`"MixedCase" DESC`:         false,
+		"email COLLATE NOCASE ASC": false,
+		"a, b DESC":                false,
+		"lower(email)":             true,
+		"email, lower(name)":       true,
+	}
+	for cols, want := range cases {
+		if got := indexColumnsLookExpression(cols); got != want {
+			t.Fatalf("indexColumnsLookExpression(%q) = %v, want %v", cols, got, want)
+		}
+	}
+}
+
+func TestConvertIndexDDLPreservesUniqueWithSortModifier(t *testing.T) {
+	got := convertIndexDDL(`CREATE UNIQUE INDEX idx_users_email ON users (email DESC);`)
+	want := `CREATE UNIQUE INDEX IF NOT EXISTS "idx_users_email" ON "users" ("email");`
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestLintIndexStatementDoesNotFlagSortModifierAsExpression(t *testing.T) {
+	issues := lintDDLStatement(`CREATE UNIQUE INDEX idx_users_email ON users (email DESC);`)
+	for _, issue := range issues {
+		if issue.Code == "EXPRESSION_INDEX" {
+			t.Fatalf("sort modifier must not be misclassified as an expression index: %#v", issues)
+		}
+	}
+}
+
 func TestConvertSchemaPartsSkipsPartialIndex(t *testing.T) {
 	path := filepath.Join("testdata", "ddl_lint_export.sql")
 	parts, _, err := ConvertSchemaParts(path)
