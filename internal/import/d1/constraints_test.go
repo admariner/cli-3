@@ -111,11 +111,106 @@ func TestConvertUniqueConstraintDropsOnConflictClause(t *testing.T) {
 }
 
 func TestConvertPrimaryKeyConstraintDropsOnConflictClause(t *testing.T) {
-	got := convertPrimaryKeyConstraint("PRIMARY KEY (a, b) ON CONFLICT ROLLBACK")
+	got := convertPrimaryKeyConstraint("PRIMARY KEY (a, b) ON CONFLICT ROLLBACK", TableSchema{})
 	want := `PRIMARY KEY ("a", "b")`
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
+}
+
+// SQLite resolves column names in table constraints case-insensitively, so the local
+// column list of PRIMARY KEY / UNIQUE / FOREIGN KEY constraints must be canonicalized to
+// the declared case, exactly like the referenced side of REFERENCES already is.
+func TestConvertTableConstraintCanonicalizesLocalColumnCase(t *testing.T) {
+	ddl := convertTablesDDL(t, `CREATE TABLE t (id INTEGER, PRIMARY KEY (ID));`)
+	if !strings.Contains(ddl, `PRIMARY KEY ("id")`) {
+		t.Fatalf("expected PRIMARY KEY column canonicalized to declared case:\n%s", ddl)
+	}
+	assertValidPostgresDDL(t, ddl)
+
+	ddl = convertTablesDDL(t, `CREATE TABLE t (a INTEGER, b INTEGER, UNIQUE (A, B));`)
+	if !strings.Contains(ddl, `UNIQUE ("a", "b")`) {
+		t.Fatalf("expected UNIQUE columns canonicalized to declared case:\n%s", ddl)
+	}
+	assertValidPostgresDDL(t, ddl)
+
+	sql := `CREATE TABLE users (id INTEGER PRIMARY KEY);
+CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, FOREIGN KEY (USER_ID) REFERENCES users(id));
+`
+	ddl = convertTablesDDL(t, sql)
+	if !strings.Contains(ddl, `FOREIGN KEY ("user_id") REFERENCES "users" ("id")`) {
+		t.Fatalf("expected FOREIGN KEY local columns canonicalized to declared case:\n%s", ddl)
+	}
+	assertValidPostgresDDL(t, ddl)
+}
+
+// Named constraints (CONSTRAINT <name> <body>) must get the same conversion as unnamed
+// ones instead of being passed through verbatim.
+func TestConvertNamedConstraint(t *testing.T) {
+	ddl := convertTablesDDL(t, `CREATE TABLE t ("MixedCase" INTEGER, CONSTRAINT chk_mixed CHECK (MixedCase > 0));`)
+	if !strings.Contains(ddl, `CONSTRAINT "chk_mixed" CHECK ("MixedCase" > 0)`) {
+		t.Fatalf("expected named CHECK constraint converted:\n%s", ddl)
+	}
+	assertValidPostgresDDL(t, ddl)
+
+	sql := `CREATE TABLE Users (id INTEGER PRIMARY KEY);
+CREATE TABLE Posts (id INTEGER PRIMARY KEY, user_id INTEGER, CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES USERS(ID));
+`
+	ddl = convertTablesDDL(t, sql)
+	if !strings.Contains(ddl, `CONSTRAINT "fk_user" FOREIGN KEY ("user_id") REFERENCES "Users" ("id")`) {
+		t.Fatalf("expected named FOREIGN KEY constraint converted:\n%s", ddl)
+	}
+
+	ddl = convertTablesDDL(t, `CREATE TABLE t (a INTEGER, b INTEGER, CONSTRAINT uq_ab UNIQUE (a, b) ON CONFLICT REPLACE);`)
+	if !strings.Contains(ddl, `CONSTRAINT "uq_ab" UNIQUE ("a", "b")`) {
+		t.Fatalf("expected named UNIQUE constraint converted with ON CONFLICT dropped:\n%s", ddl)
+	}
+	assertValidPostgresDDL(t, ddl)
+}
+
+// SQL keywords inside a CHECK expression must never be quoted as column references, even
+// when the table has a column with the same name.
+func TestConvertCheckExprKeywordsNotQuotedAsColumns(t *testing.T) {
+	table := TableSchema{Name: "t", Columns: []ColumnSchema{
+		{Name: "a", Type: "INTEGER"},
+		{Name: "b", Type: "INTEGER"},
+		{Name: "and", Type: "INTEGER"},
+		{Name: "end", Type: "INTEGER"},
+	}}
+	got := convertCheckExpr("a > 0 AND b < 5", table)
+	want := `"a" > 0 AND "b" < 5`
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+	// A keyword-named column can still be referenced when quoted in the source DDL.
+	got = convertCheckExpr(`"end" > 0`, table)
+	want = `"end" > 0`
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+// Bracket- and backtick-quoted identifiers are valid SQLite quoting that Postgres
+// rejects; both must be converted to double-quoted identifiers with declared case.
+func TestConvertCheckExprBracketAndBacktickIdentifiers(t *testing.T) {
+	table := TableSchema{Name: "t", Columns: []ColumnSchema{{Name: "Age", Type: "INTEGER"}}}
+	cases := map[string]string{
+		"[Age] > 0":     `"Age" > 0`,
+		"[age] > 0":     `"Age" > 0`,
+		"`Age` > 0":     `"Age" > 0`,
+		"`age` > 0":     `"Age" > 0`,
+		"[unknown] > 0": `"unknown" > 0`,
+	}
+	for expr, want := range cases {
+		if got := convertCheckExpr(expr, table); got != want {
+			t.Fatalf("convertCheckExpr(%q) = %q, want %q", expr, got, want)
+		}
+	}
+	ddl := convertTablesDDL(t, "CREATE TABLE t (\"Age\" INTEGER, CHECK ([Age] >= 0));")
+	if !strings.Contains(ddl, `CHECK ("Age" >= 0)`) {
+		t.Fatalf("expected bracket identifier converted in CHECK:\n%s", ddl)
+	}
+	assertValidPostgresDDL(t, ddl)
 }
 
 func TestIsPartialIndexDDLNoWhitespaceBeforeWhere(t *testing.T) {
