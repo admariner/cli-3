@@ -34,6 +34,15 @@ type ColumnSchema struct {
 	Unique        bool
 	DefaultValue  string
 	ForeignKey    string
+	// CheckExprs holds raw (unconverted) column-level CHECK expressions, e.g.
+	// ["age >= 0"] for `age INTEGER CHECK (age >= 0)`.
+	CheckExprs []string
+	// GeneratedExpr holds the raw (unconverted) expression of a
+	// `GENERATED ALWAYS AS (...)` computed column, empty if the column is not generated.
+	GeneratedExpr string
+	// GeneratedMode is "STORED" or "VIRTUAL" as declared in the source DDL, empty if
+	// GeneratedExpr is empty. SQLite defaults to VIRTUAL when omitted.
+	GeneratedMode string
 }
 
 // ParseDump reads a SQLite SQL dump and extracts table definitions.
@@ -161,12 +170,20 @@ func parseColumn(def string) ColumnSchema {
 	}
 
 	colType := firstToken(rest)
+	constraints := restAfterFirstToken(rest)
+	// Preserve precision/scale on NUMERIC/DECIMAL declarations (e.g. "DECIMAL(10,2)") so
+	// the Postgres type mapping can produce NUMERIC(10,2) instead of losing it.
+	if isNumericAffinityTypeName(colType) {
+		if params, remainder, ok := extractLeadingParenGroup(constraints); ok {
+			colType += params
+			constraints = remainder
+		}
+	}
 	col := ColumnSchema{
 		Name: name,
 		Type: colType,
 	}
 
-	constraints := restAfterFirstToken(rest)
 	if idx := indexSQLKeyword(constraints, "DEFAULT"); idx >= 0 {
 		afterDefault := strings.TrimSpace(constraints[idx+len("DEFAULT"):])
 		col.DefaultValue = trimDefaultClause(afterDefault)
@@ -176,7 +193,12 @@ func parseColumn(def string) ColumnSchema {
 			constraints = strings.TrimSpace(constraints + " " + trailing)
 		}
 	}
-	constraints = stripCheckClauses(constraints)
+	constraints, checkExprs := extractCheckClauses(constraints)
+	col.CheckExprs = checkExprs
+
+	constraints, generatedExpr, generatedMode := extractGeneratedClause(constraints)
+	col.GeneratedExpr = generatedExpr
+	col.GeneratedMode = generatedMode
 
 	if indexSQLKeyword(constraints, "NOT NULL") >= 0 {
 		col.NotNull = true
@@ -546,6 +568,26 @@ func trimDefaultClause(s string) string {
 	return strings.TrimSuffix(strings.TrimSpace(s), ",")
 }
 
+func isNumericAffinityTypeName(t string) bool {
+	upper := strings.ToUpper(t)
+	return upper == "NUMERIC" || upper == "DECIMAL"
+}
+
+// extractLeadingParenGroup extracts a "(...)" group from the start of s (allowing leading
+// whitespace before the opening paren), returning the group text, the remainder of s after
+// it, and whether a group was found.
+func extractLeadingParenGroup(s string) (params, remainder string, ok bool) {
+	trimmed := strings.TrimLeft(s, " \t")
+	if !strings.HasPrefix(trimmed, "(") {
+		return "", s, false
+	}
+	end, matched := matchingParenEnd(trimmed, 0)
+	if !matched {
+		return "", s, false
+	}
+	return trimmed[:end+1], strings.TrimSpace(trimmed[end+1:]), true
+}
+
 func restAfterFirstToken(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -604,17 +646,23 @@ func isSQLIdentChar(c byte) bool {
 	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'
 }
 
-func stripCheckClauses(s string) string {
+// extractCheckClauses removes column-level CHECK(...) clauses from s, returning the
+// cleaned string (so remaining constraint keywords like NOT NULL can be detected without
+// confusion from text inside the CHECK expression) along with the raw, unconverted
+// expressions that were found inside each CHECK(...).
+func extractCheckClauses(s string) (string, []string) {
 	upper := strings.ToUpper(s)
 	var out strings.Builder
+	var checks []string
 	for i := 0; i < len(s); {
-		if strings.HasPrefix(upper[i:], "CHECK") && (i+5 == len(s) || !isSQLIdentChar(upper[i+5])) {
+		if strings.HasPrefix(upper[i:], "CHECK") && (i == 0 || !isSQLIdentChar(upper[i-1])) && (i+5 == len(s) || !isSQLIdentChar(upper[i+5])) {
 			j := i + 5
 			for j < len(s) && (s[j] == ' ' || s[j] == '\t') {
 				j++
 			}
 			if j < len(s) && s[j] == '(' {
 				if end, ok := matchingParenEnd(s, j); ok {
+					checks = append(checks, strings.TrimSpace(s[j+1:end]))
 					i = end + 1
 					continue
 				}
@@ -623,7 +671,46 @@ func stripCheckClauses(s string) string {
 		out.WriteByte(s[i])
 		i++
 	}
-	return out.String()
+	return out.String(), checks
+}
+
+// generatedAsRe matches the `[GENERATED ALWAYS] AS (` prefix of a computed column
+// definition, up to (but not including) the opening paren of the generation expression.
+var generatedAsRe = regexp.MustCompile(`(?i)(?:GENERATED\s+ALWAYS\s+)?\bAS\b\s*\(`)
+
+// extractGeneratedClause removes a `[GENERATED ALWAYS] AS (expr) [STORED|VIRTUAL]` computed
+// column clause from s, returning the cleaned string along with the raw (unconverted)
+// generation expression and its storage mode. Returns s unchanged with an empty expr/mode
+// if no generated-column clause is present.
+func extractGeneratedClause(s string) (cleaned, expr, mode string) {
+	loc := generatedAsRe.FindStringIndex(s)
+	if loc == nil {
+		return s, "", ""
+	}
+	openParen := loc[1] - 1
+	end, ok := matchingParenEnd(s, openParen)
+	if !ok {
+		return s, "", ""
+	}
+	expr = strings.TrimSpace(s[openParen+1 : end])
+
+	rest := s[end+1:]
+	trimmedRest := strings.TrimLeft(rest, " \t")
+	leadingWS := len(rest) - len(trimmedRest)
+	upperTrimmedRest := strings.ToUpper(trimmedRest)
+	switch {
+	case strings.HasPrefix(upperTrimmedRest, "STORED"):
+		mode = "STORED"
+		rest = rest[leadingWS+len("STORED"):]
+	case strings.HasPrefix(upperTrimmedRest, "VIRTUAL"):
+		mode = "VIRTUAL"
+		rest = rest[leadingWS+len("VIRTUAL"):]
+	default:
+		// SQLite defaults to VIRTUAL when the storage mode is omitted.
+		mode = "VIRTUAL"
+	}
+	cleaned = strings.TrimSpace(s[:loc[0]] + " " + rest)
+	return cleaned, expr, mode
 }
 
 func matchingParenEnd(s string, open int) (int, bool) {
