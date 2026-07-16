@@ -161,7 +161,35 @@ func indexedColumnPartLooksLikeExpression(part string) bool {
 	if rest == "" {
 		return false
 	}
-	return strings.ContainsAny(rest, "|+-*/%<>=!~&^")
+	if strings.ContainsAny(rest, "|+*/%<>=!~&^") {
+		return true
+	}
+	return hyphenLooksLikeOperator(rest)
+}
+
+// hyphenLooksLikeOperator reports whether rest contains a '-' used as a binary/unary
+// arithmetic operator (e.g. "- 1", "a-1") rather than embedded inside an identifier-like
+// word, such as a COLLATE locale name (e.g. "COLLATE en-US"). A hyphen only counts as an
+// operator when it isn't flanked by ASCII letters on both sides — locale-style tokens keep
+// letters on both sides of every hyphen, while arithmetic usage puts whitespace, digits, or
+// the start/end of the string next to it.
+func hyphenLooksLikeOperator(rest string) bool {
+	for i := 0; i < len(rest); i++ {
+		if rest[i] != '-' {
+			continue
+		}
+		leftIsLetter := i > 0 && isASCIILetter(rest[i-1])
+		rightIsLetter := i+1 < len(rest) && isASCIILetter(rest[i+1])
+		if leftIsLetter && rightIsLetter {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func isASCIILetter(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
 func simpleIndexColumnName(name string) bool {

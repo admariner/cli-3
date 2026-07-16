@@ -94,6 +94,25 @@ func TestIndexColumnsLookExpressionDetectsUnparenthesizedOperators(t *testing.T)
 	}
 }
 
+// TestIndexColumnsLookExpressionToleratesHyphenatedCollationName guards against a
+// hyphenated COLLATE locale name (e.g. "en-US") being misclassified as an expression index
+// just because it contains a '-'. The hyphen there is part of a locale identifier, not an
+// arithmetic operator, and must not cause the index to be skipped.
+func TestIndexColumnsLookExpressionToleratesHyphenatedCollationName(t *testing.T) {
+	cases := map[string]bool{
+		"email COLLATE en-US":       false,
+		"email COLLATE en-US ASC":   false,
+		"email COLLATE en_US-x-icu": false,
+		"email - 1":                 true,
+		"email-1":                   true,
+	}
+	for cols, want := range cases {
+		if got := indexColumnsLookExpression(cols); got != want {
+			t.Fatalf("indexColumnsLookExpression(%q) = %v, want %v", cols, got, want)
+		}
+	}
+}
+
 func TestConvertIndexDDLSkipsUnparenthesizedExpressionIndex(t *testing.T) {
 	got := convertIndexDDL(`CREATE INDEX idx ON items(email || domain);`)
 	if got != "" {
