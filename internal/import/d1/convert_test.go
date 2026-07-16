@@ -193,7 +193,6 @@ func TestConvertDefaultTimeNow(t *testing.T) {
 	}
 }
 
-// Bug 2: fallback DEFAULT string-quoting did not escape embedded quotes, producing broken SQL.
 func TestConvertDefaultEscapesEmbeddedQuotes(t *testing.T) {
 	ddl := convertTablesDDL(t, `CREATE TABLE logs (id INTEGER PRIMARY KEY, ts TEXT DEFAULT (strftime('%Y-%m-%d','now')));`)
 	if !strings.Contains(ddl, `'(strftime(''%Y-%m-%d'',''now''))'`) {
@@ -202,7 +201,6 @@ func TestConvertDefaultEscapesEmbeddedQuotes(t *testing.T) {
 	assertValidPostgresDDL(t, ddl)
 }
 
-// Bug 3: DEFAULT (random()) on an INTEGER/BIGINT column silently yielded near-constant 0/1.
 func TestConvertDefaultRandomInteger(t *testing.T) {
 	ddl := convertTablesDDL(t, `CREATE TABLE tokens (id INTEGER PRIMARY KEY, nonce INTEGER DEFAULT (random()));`)
 	if !strings.Contains(ddl, "floor(random() * 9223372036854775807)") {
@@ -211,7 +209,6 @@ func TestConvertDefaultRandomInteger(t *testing.T) {
 	assertValidPostgresDDL(t, ddl)
 }
 
-// Bug 4: julianday(...)/randomblob(...) defaults referenced nonexistent Postgres functions.
 func TestConvertDefaultJuliandayNow(t *testing.T) {
 	ddl := convertTablesDDL(t, `CREATE TABLE t (id INTEGER PRIMARY KEY, jd REAL DEFAULT (julianday('now')));`)
 	if strings.Contains(strings.ToUpper(ddl), "JULIANDAY(") {
@@ -231,7 +228,6 @@ func TestConvertDefaultRandomblob(t *testing.T) {
 	assertValidPostgresDDL(t, ddl)
 }
 
-// Bug 6: UUID-inferred TEXT column with randomblob()/hex() DEFAULT was wrapped as an invalid literal.
 func TestConvertDefaultUUIDGeneratorExpr(t *testing.T) {
 	sql := `CREATE TABLE items (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(6))))
@@ -251,8 +247,8 @@ INSERT INTO items (id) VALUES ('11111111-1111-4111-8111-111111111111');
 	assertValidPostgresDDL(t, ddl)
 }
 
-// Bug 5: the boolean-like INTEGER heuristic ignored foreign keys, so an FK column could
-// become BOOLEAN while its referenced primary key stayed BIGINT.
+// An FK column must keep the type of the primary key it references, even when its sampled
+// values look boolean-like (only 0/1), or the two columns end up with mismatched types.
 func TestBooleanHeuristicIgnoresForeignKeys(t *testing.T) {
 	sql := `CREATE TABLE roles (id INTEGER PRIMARY KEY);
 CREATE TABLE users (id INTEGER PRIMARY KEY, role_id INTEGER REFERENCES roles(id));
@@ -269,7 +265,6 @@ INSERT INTO users (id, role_id) VALUES (1, 0), (2, 1);
 	assertValidPostgresDDL(t, ddl)
 }
 
-// Bug 7: BOOLEAN-mapped column DEFAULT only special-cased literal "0"/"1".
 func TestConvertDefaultBooleanNonZeroOneLiteral(t *testing.T) {
 	sql := `CREATE TABLE flags (
   id INTEGER PRIMARY KEY,
@@ -285,8 +280,6 @@ INSERT INTO flags (id, rollout_state) VALUES (2, 1);
 	assertValidPostgresDDL(t, ddl)
 }
 
-// Bug 8: SQLite's double-quoted string DEFAULT literal fallback was emitted as a Postgres
-// identifier, which always fails since Postgres never treats double quotes as literals.
 func TestConvertDefaultDoubleQuotedLiteral(t *testing.T) {
 	ddl := convertTablesDDL(t, `CREATE TABLE t (id INTEGER PRIMARY KEY, status TEXT DEFAULT "active");`)
 	if !strings.Contains(ddl, `DEFAULT 'active'`) {
@@ -295,8 +288,6 @@ func TestConvertDefaultDoubleQuotedLiteral(t *testing.T) {
 	assertValidPostgresDDL(t, ddl)
 }
 
-// Bug 15: unmapped quote-free function DEFAULTs like CAST(...) became literal strings
-// instead of the computed value they were meant to represent.
 func TestConvertDefaultCastUnixepoch(t *testing.T) {
 	ddl := convertTablesDDL(t, `CREATE TABLE t (id INTEGER PRIMARY KEY, cst TEXT DEFAULT (CAST(unixepoch() AS TEXT)));`)
 	if strings.Contains(ddl, "'CAST(") || strings.Contains(ddl, "CAST(unixepoch") {
@@ -308,7 +299,6 @@ func TestConvertDefaultCastUnixepoch(t *testing.T) {
 	assertValidPostgresDDL(t, ddl)
 }
 
-// Bug 16: NUMERIC/DECIMAL-affinity columns were mapped to TEXT, losing numeric semantics.
 func TestConvertNumericDecimalTypes(t *testing.T) {
 	ddl := convertTablesDDL(t, `CREATE TABLE t (id INTEGER PRIMARY KEY, amount DECIMAL(10,2) NOT NULL, tax NUMERIC NOT NULL);`)
 	if !strings.Contains(ddl, `"amount" NUMERIC(10,2) NOT NULL`) {
@@ -320,8 +310,6 @@ func TestConvertNumericDecimalTypes(t *testing.T) {
 	assertValidPostgresDDL(t, ddl)
 }
 
-// Bug 14: GENERATED ALWAYS AS (...) STORED computed columns were silently stripped of their
-// generation expression, becoming ordinary writable columns.
 func TestConvertGeneratedStoredColumn(t *testing.T) {
 	ddl := convertTablesDDL(t, `CREATE TABLE line_items (id INTEGER PRIMARY KEY, price REAL NOT NULL, qty REAL NOT NULL, total REAL GENERATED ALWAYS AS (price * qty) STORED);`)
 	if !strings.Contains(ddl, `GENERATED ALWAYS AS ("price" * "qty") STORED`) {

@@ -37,8 +37,6 @@ func TestColumnFKTargetUsesTableConstraint(t *testing.T) {
 	}
 }
 
-// Bug 9: table-level CHECK constraints were passed through verbatim, so a CHECK referencing
-// a mixed-case column broke once Postgres folded the unquoted reference to lowercase.
 func TestConvertCheckConstraintRequotesMixedCaseColumn(t *testing.T) {
 	ddl := convertTablesDDL(t, `CREATE TABLE t ("MixedCase" INTEGER, CHECK (MixedCase > 0));`)
 	if !strings.Contains(ddl, `CHECK ("MixedCase" > 0)`) {
@@ -47,9 +45,6 @@ func TestConvertCheckConstraintRequotesMixedCaseColumn(t *testing.T) {
 	assertValidPostgresDDL(t, ddl)
 }
 
-// Bug 18: CHECK constraints with double-quoted string literals (SQLite's double-quote
-// literal fallback) were passed through unmodified, so Postgres treated them as
-// (nonexistent) column references instead of string values.
 func TestConvertCheckConstraintDoubleQuotedLiterals(t *testing.T) {
 	ddl := convertTablesDDL(t, `CREATE TABLE t (status TEXT, CHECK (status IN ("active", "inactive")));`)
 	if !strings.Contains(ddl, `CHECK ("status" IN ('active', 'inactive'))`) {
@@ -58,9 +53,6 @@ func TestConvertCheckConstraintDoubleQuotedLiterals(t *testing.T) {
 	assertValidPostgresDDL(t, ddl)
 }
 
-// Bug 10: FK/REFERENCES clauses were quoted with whatever case appeared in the clause
-// itself rather than the declared table/column case, so case-insensitive SQLite references
-// broke once Postgres compared quoted (case-sensitive) identifiers.
 func TestConvertReferencesClauseCanonicalizesCase(t *testing.T) {
 	sql := `CREATE TABLE Users (id INTEGER PRIMARY KEY);
 CREATE TABLE Posts (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES USERS(ID));
@@ -70,14 +62,12 @@ CREATE TABLE Posts (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES USERS(ID)
 		t.Fatalf("expected REFERENCES canonicalized to declared table/column case:\n%s", ddl)
 	}
 	// Verify the canonicalized REFERENCES clause against real Postgres with tables created
-	// in dependency order (table load ordering for case-mismatched FK references is a
-	// separate, pre-existing concern outside this fix's scope).
+	// in dependency order; table load ordering for case-mismatched FK references is a
+	// separate, pre-existing concern not covered by this test.
 	verifyDDL := `CREATE TABLE "Users" ("id" BIGINT PRIMARY KEY); CREATE TABLE "Posts" ("id" BIGINT PRIMARY KEY, "user_id" BIGINT REFERENCES "Users" ("id"));`
 	assertValidPostgresDDL(t, verifyDDL)
 }
 
-// Bug 11: PRIMARY KEY/UNIQUE column lists with ASC/DESC/COLLATE modifiers were quoted as a
-// single broken identifier (e.g. "b DESC") instead of a plain column reference.
 func TestQuoteColumnListStripsIndexedColumnModifiers(t *testing.T) {
 	got := quoteColumnList("a, b DESC")
 	want := `"a", "b"`
@@ -91,8 +81,6 @@ func TestQuoteColumnListStripsIndexedColumnModifiers(t *testing.T) {
 	assertValidPostgresDDL(t, ddl)
 }
 
-// Bug 12: PRIMARY KEY/UNIQUE constraints with a trailing ON CONFLICT clause were emitted
-// unconverted (raw SQLite syntax), which Postgres cannot parse.
 func TestConvertUniqueConstraintDropsOnConflictClause(t *testing.T) {
 	ddl := convertTablesDDL(t, `CREATE TABLE t (a INTEGER, b INTEGER, UNIQUE (a, b) ON CONFLICT REPLACE);`)
 	if strings.Contains(strings.ToUpper(ddl), "ON CONFLICT") {
@@ -112,8 +100,6 @@ func TestConvertPrimaryKeyConstraintDropsOnConflictClause(t *testing.T) {
 	}
 }
 
-// Bug 13: partial-index detection required whitespace around WHERE, so a valid partial
-// index written without a space before WHERE silently became a full-table index.
 func TestIsPartialIndexDDLNoWhitespaceBeforeWhere(t *testing.T) {
 	if !isPartialIndexDDL(`CREATE UNIQUE INDEX idx ON t (a)WHERE deleted_at IS NULL;`) {
 		t.Fatal("expected partial index to be detected without whitespace before WHERE")

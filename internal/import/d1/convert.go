@@ -217,12 +217,15 @@ func sqliteTypeToPostgres(col ColumnSchema, table TableSchema, all []TableSchema
 // a Postgres NUMERIC type, preserving any declared precision/scale, e.g. "DECIMAL(10,2)" ->
 // "NUMERIC(10,2)".
 func numericPostgresType(t string) string {
-	if idx := strings.Index(t, "("); idx >= 0 {
-		if end := strings.Index(t[idx:], ")"); end >= 0 {
-			return "NUMERIC" + t[idx:idx+end+1]
-		}
+	idx := strings.Index(t, "(")
+	if idx < 0 {
+		return "NUMERIC"
 	}
-	return "NUMERIC"
+	end := strings.Index(t[idx:], ")")
+	if end < 0 {
+		return "NUMERIC"
+	}
+	return "NUMERIC" + t[idx:idx+end+1]
 }
 
 func convertDefault(def, pgType string) string {
@@ -319,11 +322,8 @@ func looksLikeUUIDGeneratorExpr(def string) bool {
 }
 
 // randomBytesExpr returns a Postgres expression producing n pseudo-random bytes using only
-// built-in functions (no pgcrypto dependency).
+// built-in functions (no pgcrypto dependency). n must be positive.
 func randomBytesExpr(n int) string {
-	if n <= 0 {
-		n = 1
-	}
 	blocks := (n + 15) / 16
 	parts := make([]string, blocks)
 	for i := 0; i < blocks; i++ {
@@ -395,13 +395,8 @@ func mapSQLiteDefaultFunction(def, pgType string) string {
 	if n := randomblobArgN(unwrapped); n > 0 {
 		return randomBytesExpr(n)
 	}
-	unwrappedUpper := strings.ToUpper(unwrapped)
-	if strings.HasPrefix(unwrappedUpper, "HEX(") {
-		if end, ok := matchingParenEnd(unwrapped, 3); ok {
-			if n := randomblobArgN(unwrapped[4:end]); n > 0 {
-				return "encode(" + randomBytesExpr(n) + ", 'hex')"
-			}
-		}
+	if n := randomblobArgN(sqliteFunctionArg(unwrapped, "HEX")); n > 0 {
+		return "encode(" + randomBytesExpr(n) + ", 'hex')"
 	}
 	return ""
 }

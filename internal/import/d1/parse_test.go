@@ -62,8 +62,6 @@ func TestParseColumnUniqueConstraint(t *testing.T) {
 	}
 }
 
-// Bug 17: column-level CHECK constraints were silently discarded during parsing (stripped
-// purely to avoid keyword confusion, never captured anywhere).
 func TestParseColumnCapturesCheckExpression(t *testing.T) {
 	col := parseColumn("age INTEGER CHECK (age >= 0)")
 	if len(col.CheckExprs) != 1 || col.CheckExprs[0] != "age >= 0" {
@@ -84,7 +82,6 @@ func TestParseColumnCheckThenNotNull(t *testing.T) {
 	}
 }
 
-// Bug 14: GENERATED ALWAYS AS (...) STORED computed columns had no parsing support at all.
 func TestParseColumnGeneratedStored(t *testing.T) {
 	col := parseColumn("total REAL GENERATED ALWAYS AS (price * qty) STORED")
 	if col.Type != "REAL" {
@@ -121,8 +118,8 @@ func TestParseColumnGeneratedThenNotNull(t *testing.T) {
 	}
 }
 
-// Bug 16 (parsing half): NUMERIC/DECIMAL precision and scale must survive column parsing so
-// the Postgres type mapping can preserve it (DECIMAL(10,2) -> NUMERIC(10,2)).
+// Precision and scale must survive column parsing (DECIMAL(10,2) stays intact) so the
+// Postgres type mapping can carry them over as NUMERIC(10,2).
 func TestParseColumnPreservesDecimalPrecision(t *testing.T) {
 	col := parseColumn("amount DECIMAL(10,2) NOT NULL")
 	if col.Type != "DECIMAL(10,2)" {

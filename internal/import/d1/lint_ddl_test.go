@@ -62,8 +62,6 @@ func TestConvertIndexDDLSkipsPartialIndex(t *testing.T) {
 	}
 }
 
-// Bug 19: index columns with ASC/DESC/NULLS/COLLATE modifiers were misclassified as
-// expression indexes and dropped entirely, including the UNIQUE constraint they carried.
 func TestIndexColumnsLookExpressionToleratesSortModifiers(t *testing.T) {
 	cases := map[string]bool{
 		"email":                    false,
@@ -82,9 +80,6 @@ func TestIndexColumnsLookExpressionToleratesSortModifiers(t *testing.T) {
 	}
 }
 
-// Bug: an expression index using an operator/concatenation token (e.g. "email || domain")
-// with no parens around the expression itself was misclassified as a plain column index,
-// because only the leading identifier was inspected and the operator tail was discarded.
 func TestIndexColumnsLookExpressionDetectsUnparenthesizedOperators(t *testing.T) {
 	cases := map[string]bool{
 		"email || domain":                true,
