@@ -241,6 +241,9 @@ func mapSQLiteDefaultFunction(def, pgType string) string {
 	if strings.HasPrefix(upper, "DATETIME(") || strings.HasPrefix(upper, "(DATETIME(") {
 		return "now()"
 	}
+	if strings.HasPrefix(upper, "DATE(") || strings.HasPrefix(upper, "(DATE(") {
+		return "CURRENT_DATE"
+	}
 	if arg := sqliteFunctionArg(trimmed, "UNIXEPOCH"); arg != "" || strings.HasSuffix(upper, "UNIXEPOCH()") {
 		if mapped := mapUnixEpochDefault(arg, pgType); mapped != "" {
 			return mapped
