@@ -148,6 +148,26 @@ func WithRegion(region string) ListOption {
 	}
 }
 
+// WithSearch returns a ListOption that sets the "q" URL parameter.
+func WithSearch(search string) ListOption {
+	return func(opt *ListOptions) error {
+		if search != "" {
+			opt.URLValues.Set("q", search)
+		}
+		return nil
+	}
+}
+
+// WithStatus returns a ListOption that sets the "status" URL parameter.
+func WithStatus(status string) ListOption {
+	return func(opt *ListOptions) error {
+		if status != "" {
+			opt.URLValues.Set("status", status)
+		}
+		return nil
+	}
+}
+
 // WithPage returns a ListOption that sets the "page" URL parameter.
 func WithPage(page int) ListOption {
 	return func(opt *ListOptions) error {

@@ -16,6 +16,8 @@ func ListCmd(ch *cmdutil.Helper) *cobra.Command {
 	var flags struct {
 		page    int
 		perPage int
+		name    string
+		status  string
 	}
 
 	cmd := &cobra.Command{
@@ -61,7 +63,12 @@ func ListCmd(ch *cmdutil.Helper) *cobra.Command {
 				Organization: ch.Config.Organization,
 				Database:     database,
 				Branch:       branch,
-			}, planetscale.WithPage(flags.page), planetscale.WithPerPage(flags.perPage))
+			},
+				planetscale.WithSearch(flags.name),
+				planetscale.WithStatus(flags.status),
+				planetscale.WithPage(flags.page),
+				planetscale.WithPerPage(flags.perPage),
+			)
 			if err != nil {
 				switch cmdutil.ErrCode(err) {
 				case planetscale.ErrNotFound:
@@ -75,10 +82,12 @@ func ListCmd(ch *cmdutil.Helper) *cobra.Command {
 			end()
 
 			if len(passwords) == 0 && ch.Printer.Format() == printer.Human {
-				if flags.page == 0 {
-					ch.Printer.Printf("No passwords exist in %s.\n", forMsg)
-				} else {
+				if flags.page > 0 {
 					ch.Printer.Println("No passwords found on this page.")
+				} else if flags.name != "" || flags.status != "" {
+					ch.Printer.Printf("No passwords in %s match the specified filters.\n", forMsg)
+				} else {
+					ch.Printer.Printf("No passwords exist in %s.\n", forMsg)
 				}
 				return nil
 			}
@@ -94,7 +103,12 @@ func ListCmd(ch *cmdutil.Helper) *cobra.Command {
 	}
 
 	cmd.Flags().BoolP("web", "w", false, "List passwords in your web browser.")
+	cmd.Flags().StringVar(&flags.name, "name", "", "Filter passwords by name using a substring match")
+	cmd.Flags().StringVar(&flags.status, "status", "", "Filter passwords by status (active, renewable, or expired)")
 	cmd.Flags().IntVar(&flags.page, "page", 0, "Page number to fetch")
 	cmd.Flags().IntVar(&flags.perPage, "per-page", 100, "Number of results per page")
+	cmd.RegisterFlagCompletionFunc("status", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+		return []string{"active", "renewable", "expired"}, cobra.ShellCompDirectiveNoFileComp
+	})
 	return cmd
 }
