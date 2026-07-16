@@ -10,10 +10,10 @@ import (
 var (
 	referencesClauseRe     = regexp.MustCompile(`(?is)^REFERENCES\s+(?:"([^"]+)"|'([^']+)'|` + "`" + `([^` + "`" + `]+)` + "`" + `|([a-zA-Z_][\w]*))\s*\(\s*([^)]+)\)\s*(.*)$`)
 	foreignKeyConstraintRe = regexp.MustCompile(`(?is)^FOREIGN\s+KEY\s*\(\s*([^)]+)\)\s*(REFERENCES\s+.+)$`)
-	primaryKeyConstraintRe = regexp.MustCompile(`(?is)^PRIMARY\s+KEY\s*\(\s*([^)]+)\)\s*$`)
-	uniqueConstraintRe     = regexp.MustCompile(`(?is)^UNIQUE\s*\(\s*([^)]+)\)\s*$`)
+	primaryKeyConstraintRe = regexp.MustCompile(`(?is)^PRIMARY\s+KEY\s*\(\s*([^)]+)\)\s*(?:ON\s+CONFLICT\s+\w+)?\s*$`)
+	uniqueConstraintRe     = regexp.MustCompile(`(?is)^UNIQUE\s*\(\s*([^)]+)\)\s*(?:ON\s+CONFLICT\s+\w+)?\s*$`)
 	createIndexRe          = regexp.MustCompile(`(?is)^CREATE\s+(UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"([^"]+)"|'([^']+)'|` + "`" + `([^` + "`" + `]+)` + "`" + `|([a-zA-Z_][\w]*))\s+ON\s+(?:"([^"]+)"|'([^']+)'|` + "`" + `([^` + "`" + `]+)` + "`" + `|([a-zA-Z_][\w]*))\s*\(\s*([^)]+)\)\s*(?:WHERE\b.+)?;?\s*$`)
-	partialIndexRe         = regexp.MustCompile(`(?is)\)\s+WHERE\s+`)
+	partialIndexRe         = regexp.MustCompile(`(?is)\)\s*WHERE\b`)
 )
 
 func isPartialIndexDDL(raw string) bool {
@@ -48,7 +48,7 @@ func referencesClause(colDef string) string {
 	return strings.TrimSpace(colDef[idx:])
 }
 
-func convertTableConstraint(clause string) string {
+func convertTableConstraint(clause string, table TableSchema, all []TableSchema) string {
 	clause = strings.TrimSpace(clause)
 	clause = strings.TrimSuffix(clause, ",")
 	if clause == "" {
@@ -58,31 +58,131 @@ func convertTableConstraint(clause string) string {
 	upper := strings.ToUpper(clause)
 	switch {
 	case strings.HasPrefix(upper, "FOREIGN KEY"):
-		return convertForeignKeyConstraint(clause)
+		return convertForeignKeyConstraint(clause, all)
 	case strings.HasPrefix(upper, "PRIMARY KEY"):
 		return convertPrimaryKeyConstraint(clause)
 	case strings.HasPrefix(upper, "UNIQUE"):
 		return convertUniqueConstraint(clause)
 	case strings.HasPrefix(upper, "CHECK"):
-		return convertCheckConstraint(clause)
+		return convertCheckConstraint(clause, table)
 	default:
 		return clause
 	}
 }
 
-func convertCheckConstraint(clause string) string {
+// convertCheckConstraint converts a table-level `CHECK (expr)` clause, re-quoting any
+// identifiers inside expr that reference the table's columns (so mixed-case column names
+// survive Postgres's case-folding of unquoted identifiers) and converting SQLite's
+// double-quoted string-literal fallback into proper single-quoted literals.
+func convertCheckConstraint(clause string, table TableSchema) string {
 	clause = strings.TrimSpace(clause)
 	clause = strings.TrimSuffix(clause, ",")
-	return clause
+
+	upper := strings.ToUpper(clause)
+	if !strings.HasPrefix(upper, "CHECK") {
+		return clause
+	}
+	rest := strings.TrimSpace(clause[len("CHECK"):])
+	if !strings.HasPrefix(rest, "(") {
+		return clause
+	}
+	end, ok := matchingParenEnd(rest, 0)
+	if !ok {
+		return clause
+	}
+	expr := rest[1:end]
+	return "CHECK (" + convertCheckExpr(expr, table) + ")"
 }
 
-func convertForeignKeyConstraint(clause string) string {
+// convertCheckExpr rewrites identifiers and string literals inside a CHECK/GENERATED
+// expression for Postgres:
+//   - bare or double-quoted tokens that match one of the table's column names (case
+//     insensitively) are re-quoted using the column's declared case, so Postgres's
+//     case-folding of unquoted identifiers can't cause a "column does not exist" error.
+//   - double-quoted tokens that do NOT match a column name are treated as SQLite's
+//     double-quoted string-literal fallback and converted to proper single-quoted
+//     string literals (Postgres always treats double quotes as identifiers).
+//   - single-quoted string literals and everything else are passed through unchanged.
+func convertCheckExpr(expr string, table TableSchema) string {
+	colMap := make(map[string]string, len(table.Columns))
+	for _, col := range table.Columns {
+		colMap[strings.ToLower(col.Name)] = col.Name
+	}
+
+	var out strings.Builder
+	n := len(expr)
+	for i := 0; i < n; {
+		c := expr[i]
+		switch {
+		case c == '\'':
+			j := i + 1
+			for j < n {
+				if expr[j] == '\'' {
+					if j+1 < n && expr[j+1] == '\'' {
+						j += 2
+						continue
+					}
+					j++
+					break
+				}
+				j++
+			}
+			out.WriteString(expr[i:j])
+			i = j
+		case c == '"':
+			j := i + 1
+			var raw strings.Builder
+			for j < n {
+				if expr[j] == '"' {
+					if j+1 < n && expr[j+1] == '"' {
+						raw.WriteByte('"')
+						j += 2
+						continue
+					}
+					j++
+					break
+				}
+				raw.WriteByte(expr[j])
+				j++
+			}
+			inner := raw.String()
+			if actual, ok := colMap[strings.ToLower(inner)]; ok {
+				out.WriteString(postgres.QuoteIdentifier(actual))
+			} else {
+				out.WriteString(quotePostgresLiteral(inner))
+			}
+			i = j
+		case isIdentStartByte(c):
+			j := i + 1
+			for j < n && isSQLIdentChar(expr[j]) {
+				j++
+			}
+			word := expr[i:j]
+			if actual, ok := colMap[strings.ToLower(word)]; ok {
+				out.WriteString(postgres.QuoteIdentifier(actual))
+			} else {
+				out.WriteString(word)
+			}
+			i = j
+		default:
+			out.WriteByte(c)
+			i++
+		}
+	}
+	return out.String()
+}
+
+func isIdentStartByte(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
+}
+
+func convertForeignKeyConstraint(clause string, all []TableSchema) string {
 	m := foreignKeyConstraintRe.FindStringSubmatch(clause)
 	if m == nil {
 		return clause
 	}
 	cols := quoteColumnList(m[1])
-	refs := convertReferencesClause(strings.TrimSpace(m[2]))
+	refs := convertReferencesClause(strings.TrimSpace(m[2]), all)
 	return "FOREIGN KEY (" + cols + ") " + refs
 }
 
@@ -102,13 +202,24 @@ func convertUniqueConstraint(clause string) string {
 	return "UNIQUE (" + quoteColumnList(m[1]) + ")"
 }
 
-func convertReferencesClause(refs string) string {
+// convertReferencesClause converts a `REFERENCES table(col, ...) [tail]` clause. SQLite
+// resolves table/column names in REFERENCES case-insensitively, but Postgres compares
+// quoted identifiers case-sensitively, so the referenced table/columns are canonicalized
+// to the actual declared case from all (the full set of parsed tables) rather than quoting
+// whatever case happens to appear in this clause.
+func convertReferencesClause(refs string, all []TableSchema) string {
 	m := referencesClauseRe.FindStringSubmatch(refs)
 	if m == nil {
 		return refs
 	}
-	table := postgres.QuoteIdentifier(firstNonEmpty(m[1], m[2], m[3], m[4]))
-	refCols := quoteColumnList(m[5])
+	rawTable := firstNonEmpty(m[1], m[2], m[3], m[4])
+	refTable := tableByName(all, rawTable)
+	tableName := rawTable
+	if refTable != nil {
+		tableName = refTable.Name
+	}
+	table := postgres.QuoteIdentifier(tableName)
+	refCols := quoteColumnListFor(m[5], refTable)
 	tail := strings.TrimSpace(m[6])
 	if tail != "" {
 		return "REFERENCES " + table + " (" + refCols + ") " + tail
@@ -116,17 +227,54 @@ func convertReferencesClause(refs string) string {
 	return "REFERENCES " + table + " (" + refCols + ")"
 }
 
+// quoteColumnList quotes a comma-separated column list, stripping SQLite indexed-column
+// modifiers (COLLATE, ASC, DESC) that cannot appear in this position in Postgres.
 func quoteColumnList(list string) string {
+	return quoteColumnListFor(list, nil)
+}
+
+// quoteColumnListFor is like quoteColumnList but additionally canonicalizes each column's
+// case against table's declared columns when table is non-nil.
+func quoteColumnListFor(list string, table *TableSchema) string {
 	parts := splitCommaList(list)
 	quoted := make([]string, 0, len(parts))
 	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
+		name := cleanIndexedColumnName(part)
+		if name == "" {
 			continue
 		}
-		quoted = append(quoted, postgres.QuoteIdentifier(strings.Trim(part, "`\"'")))
+		quoted = append(quoted, postgres.QuoteIdentifier(canonicalColumnName(name, table)))
 	}
 	return strings.Join(quoted, ", ")
+}
+
+// cleanIndexedColumnName extracts the bare column name from a column-list entry that may
+// carry SQLite indexed-column modifiers, e.g. "b DESC" -> "b", `"MixedCase" COLLATE NOCASE
+// ASC` -> "MixedCase".
+func cleanIndexedColumnName(part string) string {
+	part = strings.TrimSpace(part)
+	if part == "" {
+		return ""
+	}
+	name, _ := parseColumnNameAndRest(part)
+	if name == "" {
+		return strings.Trim(part, "`\"'")
+	}
+	return name
+}
+
+// canonicalColumnName looks up name (case-insensitively) among table's declared columns
+// and returns the declared case, or name unchanged if table is nil or has no match.
+func canonicalColumnName(name string, table *TableSchema) string {
+	if table == nil {
+		return name
+	}
+	for _, col := range table.Columns {
+		if strings.EqualFold(col.Name, name) {
+			return col.Name
+		}
+	}
+	return name
 }
 
 func splitCommaList(list string) []string {
