@@ -181,3 +181,67 @@ func TestPassword_DeleteCmdByNameNotFound(t *testing.T) {
 	c.Assert(err, qt.ErrorMatches, `password with name nonexistent-password does not exist.*`)
 	c.Assert(svc.ListFnInvoked, qt.IsTrue)
 }
+
+func TestPassword_DeleteCmdByNameEarlyExit(t *testing.T) {
+	c := qt.New(t)
+
+	var buf bytes.Buffer
+	format := printer.JSON
+	p := printer.NewPrinter(&format)
+	p.SetResourceOutput(&buf)
+
+	org := "planetscale"
+	db := "planetscale"
+	branch := "development"
+	passwordName := "target-password"
+	passwordId := "password123"
+
+	listCalls := 0
+	svc := &mock.PasswordsService{
+		ListFn: func(ctx context.Context, req *ps.ListDatabaseBranchPasswordRequest, opts ...ps.ListOption) ([]*ps.DatabaseBranchPassword, error) {
+			listCalls++
+			c.Assert(req.Organization, qt.Equals, org)
+			c.Assert(req.Database, qt.Equals, db)
+			c.Assert(req.Branch, qt.Equals, branch)
+
+			if listCalls == 1 {
+				c.Assert(listQueryParam(opts, "page"), qt.Equals, "1")
+				page := make([]*ps.DatabaseBranchPassword, 100)
+				for i := range page {
+					page[i] = &ps.DatabaseBranchPassword{
+						PublicID: "other",
+						Name:     "filler",
+					}
+				}
+				return page, nil
+			}
+
+			c.Assert(listQueryParam(opts, "page"), qt.Equals, "2")
+			return []*ps.DatabaseBranchPassword{
+				{PublicID: passwordId, Name: passwordName},
+			}, nil
+		},
+		DeleteFn: func(ctx context.Context, req *ps.DeleteDatabaseBranchPasswordRequest) error {
+			c.Assert(req.PasswordId, qt.Equals, passwordId)
+			return nil
+		},
+	}
+
+	ch := &cmdutil.Helper{
+		Printer: p,
+		Config: &config.Config{
+			Organization: org,
+		},
+		Client: func() (*ps.Client, error) {
+			return &ps.Client{Passwords: svc}, nil
+		},
+	}
+
+	cmd := DeleteCmd(ch)
+	cmd.SetArgs([]string{db, branch, "--name", passwordName, "--force"})
+	err := cmd.Execute()
+
+	c.Assert(err, qt.IsNil)
+	c.Assert(listCalls, qt.Equals, 2)
+	c.Assert(svc.DeleteFnInvoked, qt.IsTrue)
+}
