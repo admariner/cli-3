@@ -16,6 +16,8 @@ func ListCmd(ch *cmdutil.Helper) *cobra.Command {
 	var flags struct {
 		page    int
 		perPage int
+		name    string
+		status  string
 	}
 
 	cmd := &cobra.Command{
@@ -56,7 +58,12 @@ func ListCmd(ch *cmdutil.Helper) *cobra.Command {
 				Organization: ch.Config.Organization,
 				Database:     database,
 				Branch:       branch,
-			}, ps.WithPage(flags.page), ps.WithPerPage(flags.perPage))
+			},
+				ps.WithSearch(flags.name),
+				ps.WithStatus(flags.status),
+				ps.WithPage(flags.page),
+				ps.WithPerPage(flags.perPage),
+			)
 			if err != nil {
 				switch cmdutil.ErrCode(err) {
 				case ps.ErrNotFound:
@@ -73,10 +80,12 @@ func ListCmd(ch *cmdutil.Helper) *cobra.Command {
 			end()
 
 			if len(roles) == 0 && ch.Printer.Format() == printer.Human {
-				if flags.page == 0 {
-					ch.Printer.Printf("No roles exist in %s.\n", forMsg)
-				} else {
+				if flags.page > 0 {
 					ch.Printer.Println("No roles found on this page.")
+				} else if flags.name != "" || flags.status != "" {
+					ch.Printer.Printf("No roles in %s match the specified filters.\n", forMsg)
+				} else {
+					ch.Printer.Printf("No roles exist in %s.\n", forMsg)
 				}
 				return nil
 			}
@@ -86,8 +95,13 @@ func ListCmd(ch *cmdutil.Helper) *cobra.Command {
 	}
 
 	cmd.Flags().BoolP("web", "w", false, "List roles in your web browser.")
+	cmd.Flags().StringVar(&flags.name, "name", "", "Filter roles by name using a substring match")
+	cmd.Flags().StringVar(&flags.status, "status", "", "Filter roles by status (active, renewable, disabled, or expired)")
 	cmd.Flags().IntVar(&flags.page, "page", 0, "Page number to fetch")
 	cmd.Flags().IntVar(&flags.perPage, "per-page", 100, "Number of results per page")
+	cmd.RegisterFlagCompletionFunc("status", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+		return []string{"active", "renewable", "disabled", "expired"}, cobra.ShellCompDirectiveNoFileComp
+	})
 	return cmd
 }
 
