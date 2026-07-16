@@ -158,7 +158,12 @@ func convertCheckExpr(expr string, table TableSchema) string {
 				j++
 			}
 			word := expr[i:j]
-			if actual, ok := colMap[strings.ToLower(word)]; ok {
+			k := j
+			for k < n && (expr[k] == ' ' || expr[k] == '\t') {
+				k++
+			}
+			isFunctionCall := k < n && expr[k] == '('
+			if actual, ok := colMap[strings.ToLower(word)]; ok && !isFunctionCall {
 				out.WriteString(postgres.QuoteIdentifier(actual))
 			} else {
 				out.WriteString(word)

@@ -45,6 +45,22 @@ func TestConvertCheckConstraintRequotesMixedCaseColumn(t *testing.T) {
 	assertValidPostgresDDL(t, ddl)
 }
 
+// TestConvertCheckConstraintFunctionCallNotQuotedAsColumn guards against a bare
+// identifier that happens to share its name with a table column being quoted as a
+// column reference when it's actually a function call (e.g. a column named "count"
+// alongside a CHECK using the count(...) aggregate/function). Quoting the function
+// name produces invalid Postgres DDL like "count"(id) instead of count(id).
+func TestConvertCheckConstraintFunctionCallNotQuotedAsColumn(t *testing.T) {
+	ddl := convertTablesDDL(t, `CREATE TABLE t (id INTEGER, count INTEGER, CHECK (count(id) > 0));`)
+	if strings.Contains(ddl, `"count"(`) {
+		t.Fatalf("function call count(id) must not be quoted as a column reference:\n%s", ddl)
+	}
+	if !strings.Contains(ddl, `CHECK (count("id") > 0)`) {
+		t.Fatalf(`expected count(...) function call preserved as-is (not quoted) in CHECK:%s`, "\n"+ddl)
+	}
+	assertValidPostgresDDL(t, ddl)
+}
+
 func TestConvertCheckConstraintDoubleQuotedLiterals(t *testing.T) {
 	ddl := convertTablesDDL(t, `CREATE TABLE t (status TEXT, CHECK (status IN ("active", "inactive")));`)
 	if !strings.Contains(ddl, `CHECK ("status" IN ('active', 'inactive'))`) {
