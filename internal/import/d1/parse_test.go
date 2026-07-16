@@ -1,6 +1,9 @@
 package d1
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseColumnDefaultBeforeNotNull(t *testing.T) {
 	col := parseColumn("active INTEGER DEFAULT 1 NOT NULL")
@@ -56,5 +59,90 @@ func TestParseColumnUniqueConstraint(t *testing.T) {
 	col = parseColumn("unique_id INTEGER PRIMARY KEY")
 	if col.Unique {
 		t.Fatalf("identifier unique_id should not be treated as UNIQUE constraint")
+	}
+}
+
+func TestParseColumnCapturesCheckExpression(t *testing.T) {
+	col := parseColumn("age INTEGER CHECK (age >= 0)")
+	if len(col.CheckExprs) != 1 || col.CheckExprs[0] != "age >= 0" {
+		t.Fatalf("CheckExprs = %#v, want [\"age >= 0\"]", col.CheckExprs)
+	}
+	if col.NotNull {
+		t.Fatal("CHECK clause must not set NOT NULL")
+	}
+}
+
+func TestParseColumnCheckThenNotNull(t *testing.T) {
+	col := parseColumn("age INTEGER CHECK (age >= 0) NOT NULL")
+	if len(col.CheckExprs) != 1 || col.CheckExprs[0] != "age >= 0" {
+		t.Fatalf("CheckExprs = %#v", col.CheckExprs)
+	}
+	if !col.NotNull {
+		t.Fatal("expected NOT NULL after CHECK clause to still be detected")
+	}
+}
+
+func TestParseColumnGeneratedStored(t *testing.T) {
+	col := parseColumn("total REAL GENERATED ALWAYS AS (price * qty) STORED")
+	if col.Type != "REAL" {
+		t.Fatalf("Type = %q, want REAL", col.Type)
+	}
+	if col.GeneratedExpr != "price * qty" {
+		t.Fatalf("GeneratedExpr = %q, want %q", col.GeneratedExpr, "price * qty")
+	}
+	if col.GeneratedMode != "STORED" {
+		t.Fatalf("GeneratedMode = %q, want STORED", col.GeneratedMode)
+	}
+	if col.DefaultValue != "" {
+		t.Fatalf("generated column must not also parse a DEFAULT, got %q", col.DefaultValue)
+	}
+}
+
+func TestParseColumnGeneratedVirtualDefaultMode(t *testing.T) {
+	col := parseColumn("total REAL AS (price * qty)")
+	if col.GeneratedExpr != "price * qty" {
+		t.Fatalf("GeneratedExpr = %q, want %q", col.GeneratedExpr, "price * qty")
+	}
+	if col.GeneratedMode != "VIRTUAL" {
+		t.Fatalf("GeneratedMode = %q, want VIRTUAL (SQLite's default when omitted)", col.GeneratedMode)
+	}
+}
+
+func TestParseColumnGeneratedThenNotNull(t *testing.T) {
+	col := parseColumn("total REAL GENERATED ALWAYS AS (price * qty) STORED NOT NULL")
+	if col.GeneratedExpr != "price * qty" {
+		t.Fatalf("GeneratedExpr = %q", col.GeneratedExpr)
+	}
+	if !col.NotNull {
+		t.Fatal("expected NOT NULL after generated clause to still be detected")
+	}
+}
+
+// Precision and scale must survive column parsing (DECIMAL(10,2) stays intact) so the
+// Postgres type mapping can carry them over as NUMERIC(10,2).
+func TestParseColumnPreservesDecimalPrecision(t *testing.T) {
+	col := parseColumn("amount DECIMAL(10,2) NOT NULL")
+	if col.Type != "DECIMAL(10,2)" {
+		t.Fatalf("Type = %q, want DECIMAL(10,2)", col.Type)
+	}
+	if !col.NotNull {
+		t.Fatal("expected NOT NULL detected after DECIMAL(10,2)")
+	}
+}
+
+func TestExtractGeneratedClauseNoMatch(t *testing.T) {
+	cleaned, expr, mode := extractGeneratedClause("NOT NULL UNIQUE")
+	if expr != "" || mode != "" || cleaned != "NOT NULL UNIQUE" {
+		t.Fatalf("got cleaned=%q expr=%q mode=%q", cleaned, expr, mode)
+	}
+}
+
+func TestExtractCheckClausesMultiple(t *testing.T) {
+	cleaned, checks := extractCheckClauses("CHECK (a > 0) NOT NULL")
+	if len(checks) != 1 || checks[0] != "a > 0" {
+		t.Fatalf("checks = %#v", checks)
+	}
+	if strings.Contains(cleaned, "CHECK") {
+		t.Fatalf("cleaned still contains CHECK: %q", cleaned)
 	}
 }

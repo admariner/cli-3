@@ -157,6 +157,12 @@ func isBooleanLikeColumn(col ColumnSchema, table TableSchema, ctx *TypeCoercionC
 	if upper != "INTEGER" && upper != "INT" {
 		return false
 	}
+	// A foreign key column tracks its referenced primary key's real integer identity, even
+	// if the sampled values in this dataset happen to only be 0/1 — coercing it to BOOLEAN
+	// would mismatch the referenced (BIGINT) column's type.
+	if refTable, _ := columnFKTarget(col, table); refTable != "" {
+		return false
+	}
 	if ctx == nil {
 		return false
 	}
