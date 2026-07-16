@@ -427,7 +427,7 @@ func mapSQLiteCastDefault(def, pgType string) string {
 	innerExpr := strings.TrimSpace(inner[:asIdx])
 	castType := strings.ToUpper(strings.TrimSpace(inner[asIdx+len(" AS "):]))
 
-	innerPgType := pgType
+	var innerPgType string
 	wantText := false
 	switch {
 	case strings.Contains(castType, "INT"):

@@ -131,6 +131,9 @@ func indexColumnsLookExpression(columns string) bool {
 		return true
 	}
 	for _, part := range splitCommaList(columns) {
+		if indexedColumnPartLooksLikeExpression(part) {
+			return true
+		}
 		name := cleanIndexedColumnName(part)
 		if name == "" {
 			continue
@@ -140,6 +143,25 @@ func indexColumnsLookExpression(columns string) bool {
 		}
 	}
 	return false
+}
+
+// indexedColumnPartLooksLikeExpression reports whether an indexed-column list entry carries
+// operator or concatenation tokens (e.g. "email || domain") after its leading identifier,
+// marking it as an expression rather than a plain column reference with optional
+// COLLATE/ASC/DESC modifiers. Unlike expressions wrapped in parens, these have no "()" for
+// the caller's cheap containsAny check to catch, so the leftover text after the identifier
+// must be inspected directly.
+func indexedColumnPartLooksLikeExpression(part string) bool {
+	part = strings.TrimSpace(part)
+	if part == "" {
+		return false
+	}
+	_, rest := parseColumnNameAndRest(part)
+	rest = strings.TrimSpace(rest)
+	if rest == "" {
+		return false
+	}
+	return strings.ContainsAny(rest, "|+-*/%<>=!~&^")
 }
 
 func simpleIndexColumnName(name string) bool {

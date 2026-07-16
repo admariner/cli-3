@@ -82,6 +82,37 @@ func TestIndexColumnsLookExpressionToleratesSortModifiers(t *testing.T) {
 	}
 }
 
+// Bug: an expression index using an operator/concatenation token (e.g. "email || domain")
+// with no parens around the expression itself was misclassified as a plain column index,
+// because only the leading identifier was inspected and the operator tail was discarded.
+func TestIndexColumnsLookExpressionDetectsUnparenthesizedOperators(t *testing.T) {
+	cases := map[string]bool{
+		"email || domain":                true,
+		"email||domain":                  true,
+		"a, email || domain":             true,
+		"first_name || ' ' || last_name": true,
+	}
+	for cols, want := range cases {
+		if got := indexColumnsLookExpression(cols); got != want {
+			t.Fatalf("indexColumnsLookExpression(%q) = %v, want %v", cols, got, want)
+		}
+	}
+}
+
+func TestConvertIndexDDLSkipsUnparenthesizedExpressionIndex(t *testing.T) {
+	got := convertIndexDDL(`CREATE INDEX idx ON items(email || domain);`)
+	if got != "" {
+		t.Fatalf("convertIndexDDL = %q, want empty", got)
+	}
+}
+
+func TestLintDDLStatementFlagsUnparenthesizedExpressionIndex(t *testing.T) {
+	issues := lintDDLStatement(`CREATE INDEX idx ON items(email || domain);`)
+	if len(issues) != 1 || issues[0].Code != "EXPRESSION_INDEX" {
+		t.Fatalf("issues = %#v", issues)
+	}
+}
+
 func TestConvertIndexDDLPreservesUniqueWithSortModifier(t *testing.T) {
 	got := convertIndexDDL(`CREATE UNIQUE INDEX idx_users_email ON users (email DESC);`)
 	want := `CREATE UNIQUE INDEX IF NOT EXISTS "idx_users_email" ON "users" ("email");`
