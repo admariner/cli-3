@@ -228,6 +228,25 @@ func TestConvertDefaultRandomblob(t *testing.T) {
 	assertValidPostgresDDL(t, ddl)
 }
 
+// TestConvertDefaultRandomblobOnNonByteaColumn guards against emitting a bytea-producing
+// DEFAULT expression for a bare `randomblob(N)` default on a column whose Postgres type
+// isn't BYTEA (e.g. TEXT). Postgres has no implicit cast from bytea to text, so the raw
+// decode(...) expression from randomBytesExpr fails CREATE TABLE outright; non-BYTEA
+// columns must fall back to a hex-encoded text representation instead.
+func TestConvertDefaultRandomblobOnNonByteaColumn(t *testing.T) {
+	ddl := convertTablesDDL(t, `CREATE TABLE t (id INTEGER PRIMARY KEY, token TEXT DEFAULT (randomblob(8)));`)
+	if strings.Contains(strings.ToUpper(ddl), "RANDOMBLOB(") {
+		t.Fatalf("randomblob() must not appear in Postgres DDL:\n%s", ddl)
+	}
+	if strings.Contains(ddl, "DEFAULT decode(") {
+		t.Fatalf("TEXT column must not receive a bytea-typed DEFAULT expression:\n%s", ddl)
+	}
+	if !strings.Contains(ddl, "encode(") {
+		t.Fatalf("expected a hex-encoded text fallback for randomblob() default on a non-BYTEA column:\n%s", ddl)
+	}
+	assertValidPostgresDDL(t, ddl)
+}
+
 func TestConvertDefaultUUIDGeneratorExpr(t *testing.T) {
 	sql := `CREATE TABLE items (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(6))))
@@ -240,6 +259,26 @@ INSERT INTO items (id) VALUES ('11111111-1111-4111-8111-111111111111');
 	}
 	if !strings.Contains(ddl, "gen_random_uuid()") {
 		t.Fatalf("expected gen_random_uuid() default:\n%s", ddl)
+	}
+	if strings.Contains(strings.ToUpper(ddl), "RANDOMBLOB") {
+		t.Fatalf("randomblob() must not leak into Postgres DDL:\n%s", ddl)
+	}
+	assertValidPostgresDDL(t, ddl)
+}
+
+// TestConvertDefaultUUIDGeneratorExprWithoutSamples guards against the fake-UUID
+// randomblob()/hex() idiom being mapped to a short, wrong-length hex string when the
+// column's Postgres type wasn't inferred as UUID (e.g. a schema-only dump with no sampled
+// rows to match against the UUID shape). The DEFAULT expression's shape alone must be
+// enough to recognize the idiom and map it to gen_random_uuid(), independent of pgType.
+func TestConvertDefaultUUIDGeneratorExprWithoutSamples(t *testing.T) {
+	sql := `CREATE TABLE items (
+  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(6))))
+);
+`
+	ddl := convertTablesDDL(t, sql)
+	if !strings.Contains(ddl, "gen_random_uuid()") {
+		t.Fatalf("expected gen_random_uuid() default even without sampled rows to infer UUID type:\n%s", ddl)
 	}
 	if strings.Contains(strings.ToUpper(ddl), "RANDOMBLOB") {
 		t.Fatalf("randomblob() must not leak into Postgres DDL:\n%s", ddl)

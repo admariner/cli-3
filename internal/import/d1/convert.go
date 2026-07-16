@@ -316,9 +316,20 @@ func parseBooleanDefaultLiteral(def string) string {
 }
 
 // looksLikeUUIDGeneratorExpr detects SQLite's common "fake UUID" idiom built from
-// randomblob()/hex() (e.g. lower(hex(randomblob(4))) || '-' || ...).
+// randomblob()/hex() (e.g. lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) ||
+// '-4' || lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' ||
+// lower(hex(randomblob(6)))). The idiom concatenates several hex(randomblob(...)) segments
+// with literal '-' separators to mimic the 8-4-4-4-12 UUID layout, which distinguishes it
+// from a single bare `randomblob(N)` byte-string default (not a UUID at all).
 func looksLikeUUIDGeneratorExpr(def string) bool {
-	return strings.Contains(strings.ToUpper(def), "RANDOMBLOB(")
+	upper := strings.ToUpper(def)
+	if strings.Count(upper, "RANDOMBLOB(") < 4 {
+		return false
+	}
+	if !strings.Contains(upper, "HEX(") {
+		return false
+	}
+	return strings.Contains(def, "-")
 }
 
 // randomBytesExpr returns a Postgres expression producing n pseudo-random bytes using only
@@ -385,15 +396,27 @@ func mapSQLiteDefaultFunction(def, pgType string) string {
 			return "(extract(epoch from now()) / 86400.0 + 2440587.5)"
 		}
 	}
-	if pgType == "UUID" && looksLikeUUIDGeneratorExpr(trimmed) {
-		return "gen_random_uuid()"
+	// Recognize the fake-UUID idiom independent of pgType/sample-based inference: a
+	// schema-only dump (no sampled rows) or a column whose samples didn't happen to match
+	// the UUID shape never gets pgType == "UUID" from isUUIDColumn, but the DEFAULT
+	// expression's shape alone is enough to know the intent.
+	if looksLikeUUIDGeneratorExpr(trimmed) {
+		if pgType == "UUID" {
+			return "gen_random_uuid()"
+		}
+		return "gen_random_uuid()::text"
 	}
 	if (pgType == "BIGINT" || pgType == "INTEGER") && isBareFunctionCall(trimmed, "RANDOM") {
 		return "(floor(random() * 9223372036854775807))::bigint"
 	}
 	unwrapped := unwrapOuterParens(trimmed)
 	if n := randomblobArgN(unwrapped); n > 0 {
-		return randomBytesExpr(n)
+		if pgType == "BYTEA" {
+			return randomBytesExpr(n)
+		}
+		// Non-BYTEA columns (e.g. TEXT) can't take a bytea-typed DEFAULT; fall back to a
+		// hex-encoded text representation, matching the HEX(randomblob(...)) case below.
+		return "encode(" + randomBytesExpr(n) + ", 'hex')"
 	}
 	if n := randomblobArgN(sqliteFunctionArg(unwrapped, "HEX")); n > 0 {
 		return "encode(" + randomBytesExpr(n) + ", 'hex')"
