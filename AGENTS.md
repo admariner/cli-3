@@ -197,6 +197,37 @@ Error: one JSON object on stdout with `status: "error"`, `error`, `issues`, and 
 
 Destructive SQL without `--force`: `status: "action_required"`, `query_kind: "destructive"`, `issues`, and `next_steps` (includes `--force` retry command).
 
+## Postgres branch changes (size, replicas, parameters)
+
+`pscale branch resize` queues a single asynchronous **change request** for a Postgres branch covering cluster size, replica count, and configuration parameters in any combination. Track it with `resize status`; cancel it with `resize cancel` while queued.
+
+```bash
+# Read the parameter catalog first (names, current/default values, restart/immutable flags)
+pscale branch parameters list <database> <branch> --org <org> --format json
+pscale branch parameters list <database> <branch> --org <org> --format json --namespace pgconf
+
+# Change parameters (repeat --parameters; keys are namespace.name)
+pscale branch resize <database> <branch> --org <org> --format json --parameters pgconf.max_connections=200
+
+# Combine size, replicas, and parameters into one change request
+pscale branch resize <database> <branch> --org <org> --format json \
+  --cluster-size PS_10_GCP_X86 --replicas 2 --parameters pgconf.max_connections=500
+
+# Block until the change finishes (default timeout 10m; tune with --wait-timeout)
+pscale branch resize <database> <branch> --org <org> --format json --parameters pgconf.work_mem=64MB --wait
+
+# Inspect the latest change request / cancel a queued one
+pscale branch resize status <database> <branch> --org <org> --format json
+pscale branch resize cancel <database> <branch> --org <org> --format json
+```
+
+- At least one of `--cluster-size`, `--replicas`, or `--parameters` is required.
+- `--parameters` values are validated against the catalog before submission; unknown or immutable parameters fail fast. Parameters with `"restart": true` in the catalog restart the database when applied — surface this to the user before changing them.
+- Change request `state` is one of `queued`, `pending`, `resizing`, `completed`, `canceled`. Only `completed` and `canceled` are terminal. Without `--wait`, poll `resize status` instead of assuming completion.
+- A no-op (branch already matches the requested configuration) prints `{"result": "no_change", "branch": "<branch>"}` in JSON mode instead of a change request.
+- `resize cancel` prints `{"result": "canceled", "branch": "<branch>"}` in JSON mode.
+- MySQL databases are rejected: use `pscale keyspace resize` for Vitess keyspaces.
+
 ## Imports (Cloudflare D1)
 
 `pscale import d1` migrates a Cloudflare D1 (SQLite) export into a PlanetScale Postgres branch. Every subcommand supports `--format json` and returns `status`, `issues`, and `next_steps`; stateful steps return a `migration_id` — pass it back with `--migration-id` to resume.
