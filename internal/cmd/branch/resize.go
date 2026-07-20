@@ -126,7 +126,10 @@ and "pscale branch resize cancel" to cancel it while queued.`,
 
 			if ch.Printer.Format() == printer.Human {
 				ch.Printer.Printf("Change to branch %s %s (state: %s).\n", printer.BoldBlue(branch), changeVerb(change.State), printer.BoldBlue(change.State))
-				if len(restartParams) > 0 && change.State != ps.PostgresBranchChangeStateCanceled {
+				// Only warn about pending restarts: once the change request
+				// has finished, any required restart already happened (or the
+				// change was canceled and no restart will occur).
+				if len(restartParams) > 0 && !change.Finished() {
 					ch.Printer.Printf("Note: %s require a database restart to take effect.\n", printer.BoldBlue(strings.Join(restartParams, ", ")))
 				}
 				return nil
