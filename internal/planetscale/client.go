@@ -565,8 +565,10 @@ func parameterErrorsToError(body []byte) error {
 
 	var msgs []string
 	for _, e := range res.Errors {
+		// Skip elements that don't match the parameter error shape rather
+		// than discarding messages already collected from valid ones.
 		if e.Name == "" || len(e.Errors) == 0 {
-			return nil
+			continue
 		}
 		key := e.Name
 		if e.Namespace != "" {
@@ -575,6 +577,9 @@ func parameterErrorsToError(body []byte) error {
 		for _, msg := range e.Errors {
 			msgs = append(msgs, key+": "+msg)
 		}
+	}
+	if len(msgs) == 0 {
+		return nil
 	}
 
 	return &Error{
