@@ -149,6 +149,18 @@ type PostgresBranchesService struct {
 
 	ResizeFn        func(context.Context, *ps.ResizePostgresBranchRequest) (*ps.PostgresBranchClusterResizeRequest, error)
 	ResizeFnInvoked bool
+
+	ListChangesFn        func(context.Context, *ps.ListPostgresBranchChangesRequest) ([]*ps.PostgresBranchClusterResizeRequest, error)
+	ListChangesFnInvoked bool
+
+	GetChangeFn        func(context.Context, *ps.GetPostgresBranchChangeRequest) (*ps.PostgresBranchClusterResizeRequest, error)
+	GetChangeFnInvoked bool
+
+	CancelChangesFn        func(context.Context, *ps.CancelPostgresBranchChangesRequest) error
+	CancelChangesFnInvoked bool
+
+	ListParametersFn        func(context.Context, *ps.ListPostgresParametersRequest) ([]*ps.PostgresParameter, error)
+	ListParametersFnInvoked bool
 }
 
 func (p *PostgresBranchesService) Create(ctx context.Context, req *ps.CreatePostgresBranchRequest) (*ps.PostgresBranch, error) {
@@ -184,4 +196,24 @@ func (p *PostgresBranchesService) ListClusterSKUs(ctx context.Context, req *ps.L
 func (p *PostgresBranchesService) Resize(ctx context.Context, req *ps.ResizePostgresBranchRequest) (*ps.PostgresBranchClusterResizeRequest, error) {
 	p.ResizeFnInvoked = true
 	return p.ResizeFn(ctx, req)
+}
+
+func (p *PostgresBranchesService) ListChanges(ctx context.Context, req *ps.ListPostgresBranchChangesRequest) ([]*ps.PostgresBranchClusterResizeRequest, error) {
+	p.ListChangesFnInvoked = true
+	return p.ListChangesFn(ctx, req)
+}
+
+func (p *PostgresBranchesService) GetChange(ctx context.Context, req *ps.GetPostgresBranchChangeRequest) (*ps.PostgresBranchClusterResizeRequest, error) {
+	p.GetChangeFnInvoked = true
+	return p.GetChangeFn(ctx, req)
+}
+
+func (p *PostgresBranchesService) CancelChanges(ctx context.Context, req *ps.CancelPostgresBranchChangesRequest) error {
+	p.CancelChangesFnInvoked = true
+	return p.CancelChangesFn(ctx, req)
+}
+
+func (p *PostgresBranchesService) ListParameters(ctx context.Context, req *ps.ListPostgresParametersRequest) ([]*ps.PostgresParameter, error) {
+	p.ListParametersFnInvoked = true
+	return p.ListParametersFn(ctx, req)
 }
