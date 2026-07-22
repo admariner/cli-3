@@ -631,6 +631,32 @@ func TestDetailQueryTabRendersProcesslistRecord(t *testing.T) {
 	c.Assert(stripped, qt.Not(qt.Contains), "transaction_id:")
 }
 
+func TestDetailRecordAndStatusStripTerminalEscapes(t *testing.T) {
+	c := qt.New(t)
+	lines := connectionRecordLines(live.Connection{
+		PID:             5,
+		Instance:        "primary",
+		Username:        "bob\x1b[31m",
+		ApplicationName: "\x1b]52;c;YWJj\x07psql",
+		ClientAddr:      "127.0.0.1\rX",
+		QueryText:       "SELECT 1\x1b]8;;https://evil.example\x07",
+	}, connectionDisplayDefault, 120)
+	joined := strings.Join(lines, "\n")
+	c.Assert(joined, qt.Not(qt.Contains), "\x1b")
+	c.Assert(joined, qt.Not(qt.Contains), "\x07")
+	c.Assert(joined, qt.Not(qt.Contains), "\r")
+	c.Assert(joined, qt.Contains, "bob[31m")
+	c.Assert(joined, qt.Contains, "]52;c;YWJjpsql")
+	c.Assert(joined, qt.Contains, "127.0.0.1X")
+
+	status := renderConnectionStatus("→ selected connection", live.Connection{
+		PID:       5,
+		QueryText: "SELECT 1\x1b]52;c;YWJj\x07",
+	}, 120)
+	c.Assert(status, qt.Contains, "SELECT 1]52;c;YWJj")
+	c.Assert(status, qt.Not(qt.Contains), "\x1b")
+}
+
 func TestDetailProcesslistZeroDurationShowsNone(t *testing.T) {
 	c := qt.New(t)
 	view := stripANSI(renderDetail(detailState{

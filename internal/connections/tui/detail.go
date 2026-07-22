@@ -187,6 +187,7 @@ func renderConnectionRecord(fields [][2]string, query string, width int) []strin
 }
 
 func detailFieldValueLines(value string, width int) []string {
+	value = sanitizeFooterText(value)
 	rendered := detailFieldValue(value)
 	if strings.TrimSpace(value) == "" || width <= 0 || ansi.StringWidth(rendered) <= width {
 		return []string{rendered}

@@ -559,6 +559,47 @@ func TestAppTextRightTruncatesLongNames(t *testing.T) {
 	c.Assert(appText("owner_writer_226"), qt.Equals, "owner_writer_2…")
 	c.Assert(appText("interactive_client_47"), qt.Equals, "interactive_c…")
 	c.Assert(appText("xxxxxxxxxxxxxx"), qt.Equals, "xxxxxxxxxxxxxx")
+	c.Assert(appText("\x1b]52;c;YWJj\x07writer"), qt.Equals, "]52;c;YWJjwri…")
+}
+
+func TestQueryPreviewAndSelectedStatusStripEscapes(t *testing.T) {
+	c := qt.New(t)
+	payload := "SELECT 1\x1b[31m FROM t\x1b]8;;https://evil.example\x07"
+	c.Assert(queryPreview(payload), qt.Equals, "SELECT 1[31m FROM t]8;;https://evil.example")
+	c.Assert(queryPreview(payload), qt.Not(qt.Contains), "\x1b")
+
+	status := renderSelectedStatus(tableState{
+		HasList:  true,
+		Selected: 0,
+		Width:    120,
+		List: live.ConnectionList{
+			Connections: []live.Connection{{
+				PID:       7,
+				QueryText: "SELECT pg_sleep(1)\x1b]52;c;YWJj\x07",
+			}},
+		},
+	})
+	c.Assert(status, qt.Contains, "selected pid 7")
+	c.Assert(status, qt.Contains, "SELECT pg_sleep(1)]52;c;YWJj")
+	c.Assert(status, qt.Not(qt.Contains), "\x1b")
+	c.Assert(status, qt.Not(qt.Contains), "\x07")
+}
+
+func TestBuildConnectionRowsSanitizesUntrustedCells(t *testing.T) {
+	c := qt.New(t)
+	headers, rows := buildConnectionRows([]live.Connection{{
+		PID:             9,
+		InstanceRole:    "primary",
+		State:           "active",
+		ApplicationName: "app\x1b[0m",
+		QueryText:       "SELECT 1\x1b]52;c;YWJj\x07",
+	}}, nil, 200, -1)
+
+	appIdx := indexOf(headers, "APP")
+	queryIdx := indexOf(headers, "QUERY")
+	c.Assert(rows[0][appIdx], qt.Equals, "app[0m")
+	c.Assert(rows[0][queryIdx], qt.Equals, "SELECT 1]52;c;YWJj")
+	c.Assert(strings.Join(rows[0], " "), qt.Not(qt.Contains), "\x1b")
 }
 
 func TestBuildConnectionRowsMarksSelectedRow(t *testing.T) {
@@ -986,6 +1027,8 @@ func TestEmptyDash(t *testing.T) {
 
 	c.Assert(emptyDash(" \t "), qt.Equals, "-")
 	c.Assert(emptyDash("app"), qt.Equals, "app")
+	c.Assert(emptyDash("\x1b[31mred\x1b[0m"), qt.Equals, "[31mred[0m")
+	c.Assert(emptyDash("\x1b]52;c;YWJj\x07"), qt.Equals, "]52;c;YWJj")
 }
 
 func TestClipLine(t *testing.T) {
