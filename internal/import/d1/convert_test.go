@@ -672,7 +672,6 @@ func TestConvertDefaultRejectsSQLInjectionOnIntegerColumn(t *testing.T) {
 	if strings.Contains(strings.ToUpper(ddl), "DROP TABLE") {
 		t.Fatalf("injected DROP must not appear in converted DDL:\n%s", ddl)
 	}
-	assertValidPostgresDDL(t, ddl)
 
 	// Direct regression for the reported payload shape on a BIGINT column.
 	col := ColumnSchema{Name: "n", Type: "INTEGER", DefaultValue: `(0)); DROP TABLE users; --`}
@@ -684,6 +683,7 @@ func TestConvertDefaultRejectsSQLInjectionOnIntegerColumn(t *testing.T) {
 	if strings.Contains(got, "DEFAULT") {
 		t.Fatalf("hostile default must be omitted entirely: %q", got)
 	}
+	assertValidPostgresDDL(t, ddl)
 }
 
 func TestConvertDefaultKeepsSafeNumericLiterals(t *testing.T) {
