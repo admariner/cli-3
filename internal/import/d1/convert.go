@@ -236,6 +236,7 @@ func convertDefault(def, pgType string) (string, bool) {
 	if upper == "NULL" {
 		return "NULL", true
 	}
+	quotedLiteral := strings.HasPrefix(def, "'") || strings.HasPrefix(def, `"`)
 	if args, ok := bareSQLiteFunctionArgs(def, "STRFTIME"); ok {
 		if mapped := mapStrftimeNowDefault(args, pgType); mapped != "" {
 			return mapped, true
@@ -243,7 +244,7 @@ func convertDefault(def, pgType string) (string, bool) {
 		if pgType != "TEXT" {
 			return "", false
 		}
-	} else if strings.Contains(upper, "STRFTIME(") && pgType != "TEXT" {
+	} else if !quotedLiteral && strings.Contains(upper, "STRFTIME(") && pgType != "TEXT" {
 		return "", false
 	}
 	if mapped := mapSQLiteDefaultFunction(def, pgType); mapped != "" {

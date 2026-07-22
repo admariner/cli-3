@@ -376,8 +376,10 @@ func TestConvertDefaultStringLiteralsStillQuoted(t *testing.T) {
 		pgType string
 		want   string
 	}{
-		"already-quoted string default": {"'foo'", "TEXT", "'foo'"},
-		"bare text default gets quoted": {"foo", "TEXT", "'foo'"},
+		"already-quoted string default":             {"'foo'", "TEXT", "'foo'"},
+		"bare text default gets quoted":             {"foo", "TEXT", "'foo'"},
+		"quoted strftime text is not a call":        {"'strftime(not a call)'", "TIMESTAMPTZ", "'strftime(not a call)'"},
+		"double-quoted strftime text is not a call": {`"strftime(not a call)"`, "TIMESTAMPTZ", "'strftime(not a call)'"},
 	}
 	for name, tc := range cases {
 		got, ok := convertDefault(tc.def, tc.pgType)
