@@ -146,3 +146,20 @@ func TestExtractCheckClausesMultiple(t *testing.T) {
 		t.Fatalf("cleaned still contains CHECK: %q", cleaned)
 	}
 }
+
+func TestParseTableBodyIgnoresSmuggledSQLAfterClose(t *testing.T) {
+	ddl := `CREATE TABLE b ( x INTEGER REFERENCES a(id) ON DELETE CASCADE); DROP TABLE users; CREATE TABLE dummy (z int );`
+	cols, constraints := parseTableBody(ddl)
+	if len(constraints) != 0 {
+		t.Fatalf("constraints = %#v", constraints)
+	}
+	if len(cols) != 1 {
+		t.Fatalf("cols = %#v", cols)
+	}
+	if cols[0].ForeignKey != `REFERENCES a(id) ON DELETE CASCADE` {
+		t.Fatalf("ForeignKey = %q, want REFERENCES without smuggled SQL", cols[0].ForeignKey)
+	}
+	if strings.Contains(strings.ToUpper(cols[0].ForeignKey), "DROP") {
+		t.Fatalf("ForeignKey must not include injected DROP: %q", cols[0].ForeignKey)
+	}
+}

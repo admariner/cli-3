@@ -123,6 +123,31 @@ func TestConvertReferencesClauseDropsInjectionTail(t *testing.T) {
 	}
 }
 
+// End-to-end: attacker dumps smuggle "); DROP ...; CREATE TABLE ..." after a real
+// REFERENCES ... ON DELETE CASCADE close. Parse must stop at the balanced CREATE TABLE
+// close, and conversion must never emit the injected statements into executed DDL.
+func TestConvertReferencesTailInjectionEndToEnd(t *testing.T) {
+	sql := `CREATE TABLE a (id INTEGER PRIMARY KEY);
+CREATE TABLE b ( x INTEGER REFERENCES a(id) ON DELETE CASCADE); DROP TABLE users; CREATE TABLE dummy (z int );
+`
+	ddl := convertTablesDDL(t, sql)
+	upper := strings.ToUpper(ddl)
+	if strings.Contains(upper, "DROP TABLE") {
+		t.Fatalf("injected DROP must not appear in converted DDL:\n%s", ddl)
+	}
+	if strings.Contains(upper, `"DUMMY"`) || strings.Contains(ddl, `"dummy"`) {
+		t.Fatalf("smuggled CREATE TABLE must not appear in converted DDL:\n%s", ddl)
+	}
+	if !strings.Contains(ddl, `REFERENCES "a" ("id")`) {
+		t.Fatalf("expected safe REFERENCES clause:\n%s", ddl)
+	}
+	// Legitimate action should survive once the trailing junk is excluded from the body.
+	if !strings.Contains(ddl, `ON DELETE CASCADE`) {
+		t.Fatalf("expected ON DELETE CASCADE preserved after stripping smuggled SQL:\n%s", ddl)
+	}
+	assertValidPostgresDDL(t, ddl)
+}
+
 func TestQuoteColumnListStripsIndexedColumnModifiers(t *testing.T) {
 	got := quoteColumnList("a, b DESC")
 	want := `"a", "b"`
