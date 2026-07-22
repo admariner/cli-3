@@ -35,6 +35,13 @@ func TestIsDestructiveQuery(t *testing.T) {
 		{query: "SELECT 1 # ; DELETE FROM users\nSELECT 2", want: false},
 		{query: "SELECT 1 /* ; TRUNCATE users */; SELECT 2", want: false},
 		{query: "SELECT 1; /* comment */ DELETE FROM users", want: true},
+		// MySQL executable comments are live SQL, not inert comments.
+		{query: "/*! DROP TABLE users */", want: true},
+		{query: "/*!50000 DROP TABLE users */", want: true},
+		{query: "/*!80000 DELETE FROM users WHERE id = 1 */", want: true},
+		{query: "/*!99999 TRUNCATE TABLE users */", want: true},
+		{query: "/*! SELECT 1 */", want: false},
+		{query: "SELECT 1 /* ! DROP TABLE users */", want: false},
 		{query: "SELECT deleted_at FROM users", want: false},
 		{query: "SELECT is_deleted FROM users", want: false},
 		{query: "SELECT * FROM delete_queue", want: false},
@@ -61,16 +68,24 @@ func TestExecuteBlocksDestructiveWithoutForce(t *testing.T) {
 		Config: &config.Config{Organization: "bb"},
 	}
 
-	_, err := Execute(t.Context(), ch, Options{
-		Organization: "bb",
-		Database:     "db",
-		Branch:       "main",
-		Query:        "DELETE FROM users",
-	})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if _, ok := errors.AsType[*DestructiveQueryError](err); !ok {
-		t.Fatalf("error = %T (%v), want *DestructiveQueryError", err, err)
+	for _, query := range []string{
+		"DELETE FROM users",
+		"/*! DROP TABLE users */",
+		"/*!50000 DROP TABLE users */",
+	} {
+		t.Run(query, func(t *testing.T) {
+			_, err := Execute(t.Context(), ch, Options{
+				Organization: "bb",
+				Database:     "db",
+				Branch:       "main",
+				Query:        query,
+			})
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if _, ok := errors.AsType[*DestructiveQueryError](err); !ok {
+				t.Fatalf("error = %T (%v), want *DestructiveQueryError", err, err)
+			}
+		})
 	}
 }
