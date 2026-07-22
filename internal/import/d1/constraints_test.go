@@ -86,6 +86,43 @@ CREATE TABLE Posts (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES USERS(ID)
 	assertValidPostgresDDL(t, verifyDDL)
 }
 
+func TestConvertReferencesClauseKeepsSafeActionTail(t *testing.T) {
+	sql := `CREATE TABLE users (id INTEGER PRIMARY KEY);
+CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id) ON DELETE CASCADE ON UPDATE SET NULL);
+`
+	ddl := convertTablesDDL(t, sql)
+	if !strings.Contains(ddl, `REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE SET NULL`) {
+		t.Fatalf("expected safe FK action tail preserved:\n%s", ddl)
+	}
+	assertValidPostgresDDL(t, ddl)
+}
+
+func TestConvertReferencesClauseDropsInjectionTail(t *testing.T) {
+	got := convertReferencesClause(`REFERENCES users(id)); DROP TABLE users; --`, nil)
+	if strings.Contains(strings.ToUpper(got), "DROP TABLE") {
+		t.Fatalf("injected DROP must not appear in REFERENCES clause: %q", got)
+	}
+	if strings.Contains(got, ");") {
+		t.Fatalf("escaping parentheses must not appear in REFERENCES clause: %q", got)
+	}
+	if got != `REFERENCES "users" ("id")` {
+		t.Fatalf("got %q, want REFERENCES with action tail stripped", got)
+	}
+
+	got = convertReferencesClause(`REFERENCES users(id) ON DELETE CASCADE); DROP TABLE users; --`, nil)
+	if strings.Contains(strings.ToUpper(got), "DROP TABLE") || strings.Contains(got, "CASCADE") {
+		// Hostile tail must be dropped entirely (not partially trusted).
+		t.Fatalf("hostile mixed tail must be dropped: %q", got)
+	}
+	if got != `REFERENCES "users" ("id")` {
+		t.Fatalf("got %q, want REFERENCES without hostile tail", got)
+	}
+
+	if got := convertReferencesClause(`NOT A REFERENCES CLAUSE); DROP TABLE users; --`, nil); got != "" {
+		t.Fatalf("unparseable REFERENCES must be omitted, got %q", got)
+	}
+}
+
 func TestQuoteColumnListStripsIndexedColumnModifiers(t *testing.T) {
 	got := quoteColumnList("a, b DESC")
 	want := `"a", "b"`

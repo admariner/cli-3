@@ -166,7 +166,9 @@ func convertColumn(col ColumnSchema, table TableSchema, all []TableSchema, ctx *
 	}
 
 	if col.ForeignKey != "" {
-		parts = append(parts, convertReferencesClause(col.ForeignKey, all))
+		if refs := convertReferencesClause(col.ForeignKey, all); refs != "" {
+			parts = append(parts, refs)
+		}
 	}
 
 	return strings.Join(parts, " ")
@@ -254,43 +256,169 @@ func convertDefault(def, pgType string) (string, bool) {
 		return mapped, true
 	}
 	if pgType == "BOOLEAN" {
-		if lit := parseBooleanDefaultLiteral(def); lit != "" {
+		if lit := parseBooleanDefaultLiteral(unwrapOuterParens(def)); lit != "" {
 			return lit, true
+		}
+		if bu := strings.ToUpper(unwrapOuterParens(def)); bu == "TRUE" || bu == "FALSE" {
+			return bu, true
 		}
 	}
 	if pgType == "UUID" {
-		return "'" + strings.Trim(def, "'\"") + "'", true
+		return convertUUIDDefault(def)
 	}
 	if strings.HasPrefix(def, "'") {
-		// Already a valid (SQLite and Postgres share '' escaping) single-quoted literal.
-		return def, true
+		if lit, ok := validatedSingleQuotedLiteral(def); ok {
+			return lit, true
+		}
+		return "", false
 	}
 	if strings.HasPrefix(def, `"`) {
+		inner, ok := validatedDoubleQuotedLiteral(def)
+		if !ok {
+			return "", false
+		}
 		// SQLite's double-quoted string-literal fallback: Postgres always treats double
 		// quotes as identifiers, so re-quote as a proper single-quoted string literal.
-		return quotePostgresLiteral(unwrapDoubleQuotedLiteral(def)), true
+		return quotePostgresLiteral(inner), true
 	}
 	if pgType == "TEXT" || pgType == "TIMESTAMPTZ" {
 		return quotePostgresLiteral(strings.Trim(def, "'\"")), true
 	}
-	return def, true
+	// Typed non-text columns (BIGINT, NUMERIC, BYTEA, …): only emit validated scalar
+	// literals. Never pass an unrecognized attacker-controlled expression through
+	// verbatim into executed DDL — that lets unbalanced ")" / ";" escape CREATE TABLE.
+	if lit, ok := safeNumericDefaultLiteral(def); ok {
+		return lit, true
+	}
+	return "", false
+}
+
+// convertUUIDDefault emits a safely quoted UUID default, or omits unrecognized input.
+func convertUUIDDefault(def string) (string, bool) {
+	def = strings.TrimSpace(def)
+	if strings.HasPrefix(def, "'") {
+		return validatedSingleQuotedLiteral(def)
+	}
+	if strings.HasPrefix(def, `"`) {
+		inner, ok := validatedDoubleQuotedLiteral(def)
+		if !ok {
+			return "", false
+		}
+		return quotePostgresLiteral(inner), true
+	}
+	if isSafeBareUUIDDefault(def) {
+		return quotePostgresLiteral(def), true
+	}
+	return "", false
+}
+
+// validatedSingleQuotedLiteral accepts a complete SQLite/Postgres single-quoted string
+// literal (with '' escapes) and rejects unclosed quotes or trailing junk after the
+// closing quote — both of which can break out of DEFAULT into adjacent SQL.
+func validatedSingleQuotedLiteral(s string) (string, bool) {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 || s[0] != '\'' {
+		return "", false
+	}
+	for i := 1; i < len(s); i++ {
+		if s[i] != '\'' {
+			continue
+		}
+		if i+1 < len(s) && s[i+1] == '\'' {
+			i++
+			continue
+		}
+		if i != len(s)-1 {
+			return "", false
+		}
+		return s, true
+	}
+	return "", false
+}
+
+// validatedDoubleQuotedLiteral accepts a complete double-quoted SQLite string-literal
+// fallback (with "" escapes) and returns the unescaped inner text. Trailing junk after
+// the closing quote is rejected.
+func validatedDoubleQuotedLiteral(s string) (string, bool) {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 || s[0] != '"' {
+		return "", false
+	}
+	var inner strings.Builder
+	for i := 1; i < len(s); i++ {
+		if s[i] != '"' {
+			inner.WriteByte(s[i])
+			continue
+		}
+		if i+1 < len(s) && s[i+1] == '"' {
+			inner.WriteByte('"')
+			i++
+			continue
+		}
+		if i != len(s)-1 {
+			return "", false
+		}
+		return inner.String(), true
+	}
+	return "", false
+}
+
+// isSafeBareUUIDDefault reports whether s is a bare UUID-shaped token safe to quote as a
+// default (hex digits and hyphens only).
+func isSafeBareUUIDDefault(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= '0' && c <= '9', c >= 'a' && c <= 'f', c >= 'A' && c <= 'F', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// safeNumericDefaultLiteral accepts a simple numeric literal, optionally wrapped in
+// balanced outer parentheses (e.g. "(0)", "((-1))"). Anything else — expressions,
+// statement terminators, unbalanced parentheses — is rejected so it cannot be spliced
+// into CREATE TABLE.
+func safeNumericDefaultLiteral(def string) (string, bool) {
+	unwrapped := strings.TrimSpace(unwrapOuterParens(def))
+	if unwrapped == "" {
+		return "", false
+	}
+	if _, err := strconv.ParseInt(unwrapped, 10, 64); err == nil {
+		return unwrapped, true
+	}
+	if _, err := strconv.ParseFloat(unwrapped, 64); err == nil {
+		upper := strings.ToUpper(unwrapped)
+		if strings.Contains(upper, "INF") || strings.Contains(upper, "NAN") {
+			return "", false
+		}
+		return unwrapped, true
+	}
+	lower := strings.ToLower(unwrapped)
+	if strings.HasPrefix(lower, "0x") {
+		hex := unwrapped[2:]
+		if n, err := strconv.ParseUint(hex, 16, 64); err == nil {
+			return strconv.FormatUint(n, 10), true
+		}
+	}
+	if strings.HasPrefix(lower, "-0x") {
+		hex := unwrapped[3:]
+		if n, err := strconv.ParseUint(hex, 16, 63); err == nil {
+			return strconv.FormatInt(-int64(n), 10), true
+		}
+	}
+	return "", false
 }
 
 // quotePostgresLiteral wraps s as a Postgres single-quoted string literal, doubling any
 // embedded single quotes so the result is always syntactically valid.
 func quotePostgresLiteral(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
-}
-
-// unwrapDoubleQuotedLiteral strips the surrounding double quotes from SQLite's
-// double-quoted string-literal fallback syntax (e.g. `"active"`), un-escaping any doubled
-// internal quotes. Returns s unchanged if it isn't double-quoted.
-func unwrapDoubleQuotedLiteral(s string) string {
-	if len(s) >= 2 && strings.HasPrefix(s, `"`) && strings.HasSuffix(s, `"`) {
-		inner := s[1 : len(s)-1]
-		return strings.ReplaceAll(inner, `""`, `"`)
-	}
-	return s
 }
 
 // unwrapOuterParens repeatedly strips a single matching outer paren pair that wraps the
