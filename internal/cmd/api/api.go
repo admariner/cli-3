@@ -185,7 +185,9 @@ func ApiCmd(ch *cmdutil.Helper, userAgent string, defaultHeaders map[string]stri
 		if res.StatusCode >= 300 && res.StatusCode < 400 {
 			location := res.Header.Get("Location")
 			if location != "" {
-				newRes, handleErr := handleRedirect(ctx, req, res, location, ch.Debug())
+				// Do not pass original request headers: secrets in -H values
+				// must not be sent to an attacker-controlled Location host.
+				newRes, handleErr := handleRedirect(ctx, location, ch.Debug())
 				if handleErr != nil {
 					return handleErr
 				}
@@ -387,27 +389,20 @@ func parseValue(s string) (interface{}, error) {
 	return v, json.Unmarshal([]byte(s), &v)
 }
 
-// handleRedirect processes cross-domain redirects by following the redirect
-// manually without sending authentication headers
-func handleRedirect(ctx context.Context, originalReq *http.Request, originalRes *http.Response, location string, debug bool) (*http.Response, error) {
-	// Create a new request without auth headers
+// handleRedirect follows a cross-domain redirect without forwarding credentials
+// or user-supplied headers. Users may put secrets in arbitrary --header/-H
+// values (Cookie, X-Api-Key, etc.), so the redirect request is created fresh
+// and must not copy headers from the original request.
+func handleRedirect(ctx context.Context, location string, debug bool) (*http.Response, error) {
 	redirectReq, err := http.NewRequestWithContext(ctx, "GET", location, nil)
 	if err != nil {
 		return nil, fmt.Errorf("preparing redirect request: %w", err)
 	}
 
-	// Copy all headers except Authorization
-	for k, v := range originalReq.Header {
-		if !strings.EqualFold(k, "Authorization") {
-			redirectReq.Header[k] = v
-		}
-	}
-
 	if debug {
-		fmt.Fprintf(os.Stderr, "Following cross-domain redirect to %s without auth headers\n", location)
+		fmt.Fprintf(os.Stderr, "Following cross-domain redirect to %s without original request headers\n", location)
 	}
 
-	// Use a new client without auth for the redirect
 	redirectClient := &http.Client{}
 	redirectRes, err := redirectClient.Do(redirectReq)
 	if err != nil {

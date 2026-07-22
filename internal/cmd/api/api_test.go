@@ -173,49 +173,37 @@ func TestRedirectCheck(t *testing.T) {
 }
 
 func TestHandleRedirect(t *testing.T) {
-	// Create a test context
 	ctx := context.Background()
 
-	// Create an original request with auth header
-	originalReq, _ := http.NewRequest("GET", "https://api.example.com/path", nil)
-	originalReq.Header.Set("Authorization", "Bearer token123")
-	originalReq.Header.Set("User-Agent", "test-agent")
-
-	// Create a mock original response
-	originalRes := &http.Response{
-		StatusCode: 302,
-		Header:     http.Header{},
+	// Cross-domain redirects must not carry credentials or user-supplied headers
+	// from the original request (Authorization, Cookie, X-Api-Key, etc.).
+	credentialHeaders := []string{
+		"Authorization",
+		"Proxy-Authorization",
+		"Cookie",
+		"X-Api-Key",
 	}
-	originalRes.Header.Set("Location", "https://other-domain.com/newpath")
 
-	// Mock a response from the redirect target
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Ensure auth header is not present
-		if r.Header.Get("Authorization") != "" {
-			t.Error("Auth header was incorrectly passed to redirect target")
+		for _, name := range credentialHeaders {
+			require.Empty(t, r.Header.Get(name),
+				"credential header %q must not be present on cross-domain redirect request", name)
 		}
-
-		// Ensure other headers were preserved
-		if r.Header.Get("User-Agent") != "test-agent" {
-			t.Error("Other headers were not preserved in redirect")
-		}
+		// Accept is a common original-request header; it must not be forwarded.
+		require.Empty(t, r.Header.Get("Accept"))
 
 		w.Write([]byte("Redirect target content"))
 	}))
 	defer mockServer.Close()
 
-	// Test the handleRedirect function with the mock server
-	redirectRes, err := handleRedirect(ctx, originalReq, originalRes, mockServer.URL, false)
+	redirectRes, err := handleRedirect(ctx, mockServer.URL, false)
 
-	// Verify the result
 	require.NoError(t, err)
 	require.NotNil(t, redirectRes)
 
-	// Read the response body
 	body, err := io.ReadAll(redirectRes.Body)
 	require.NoError(t, err)
 	redirectRes.Body.Close()
 
-	// Verify the response content
 	require.Equal(t, "Redirect target content", string(body))
 }
