@@ -156,7 +156,9 @@ func convertColumn(col ColumnSchema, table TableSchema, all []TableSchema, ctx *
 	}
 
 	if col.DefaultValue != "" && !col.AutoIncrement && col.GeneratedExpr == "" {
-		parts = append(parts, "DEFAULT", convertDefault(col.DefaultValue, pgType))
+		if def, ok := convertDefault(col.DefaultValue, pgType); ok {
+			parts = append(parts, "DEFAULT", def)
+		}
 	}
 
 	for _, check := range col.CheckExprs {
@@ -228,39 +230,49 @@ func numericPostgresType(t string) string {
 	return "NUMERIC" + t[idx:idx+end+1]
 }
 
-func convertDefault(def, pgType string) string {
+func convertDefault(def, pgType string) (string, bool) {
 	def = strings.TrimSpace(def)
 	upper := strings.ToUpper(def)
 	if upper == "NULL" {
-		return "NULL"
+		return "NULL", true
+	}
+	if args, ok := bareSQLiteFunctionArgs(def, "STRFTIME"); ok {
+		if mapped := mapStrftimeNowDefault(args, pgType); mapped != "" {
+			return mapped, true
+		}
+		if pgType != "TEXT" {
+			return "", false
+		}
+	} else if strings.Contains(upper, "STRFTIME(") && pgType != "TEXT" {
+		return "", false
 	}
 	if mapped := mapSQLiteDefaultFunction(def, pgType); mapped != "" {
-		return mapped
+		return mapped, true
 	}
 	if mapped := mapSQLiteCastDefault(def, pgType); mapped != "" {
-		return mapped
+		return mapped, true
 	}
 	if pgType == "BOOLEAN" {
 		if lit := parseBooleanDefaultLiteral(def); lit != "" {
-			return lit
+			return lit, true
 		}
 	}
 	if pgType == "UUID" {
-		return "'" + strings.Trim(def, "'\"") + "'"
+		return "'" + strings.Trim(def, "'\"") + "'", true
 	}
 	if strings.HasPrefix(def, "'") {
 		// Already a valid (SQLite and Postgres share '' escaping) single-quoted literal.
-		return def
+		return def, true
 	}
 	if strings.HasPrefix(def, `"`) {
 		// SQLite's double-quoted string-literal fallback: Postgres always treats double
 		// quotes as identifiers, so re-quote as a proper single-quoted string literal.
-		return quotePostgresLiteral(unwrapDoubleQuotedLiteral(def))
+		return quotePostgresLiteral(unwrapDoubleQuotedLiteral(def)), true
 	}
 	if pgType == "TEXT" || pgType == "TIMESTAMPTZ" {
-		return quotePostgresLiteral(strings.Trim(def, "'\""))
+		return quotePostgresLiteral(strings.Trim(def, "'\"")), true
 	}
-	return def
+	return def, true
 }
 
 // quotePostgresLiteral wraps s as a Postgres single-quoted string literal, doubling any
@@ -390,7 +402,7 @@ func mapSQLiteDefaultFunction(def, pgType string) string {
 			return mapped
 		}
 	}
-	if arg := sqliteFunctionArg(trimmed, "STRFTIME"); arg != "" {
+	if arg, ok := bareSQLiteFunctionArgs(trimmed, "STRFTIME"); ok {
 		if mapped := mapStrftimeNowDefault(arg, pgType); mapped != "" {
 			return mapped
 		}
@@ -529,106 +541,57 @@ func unixEpochArgLooksNumeric(arg string) bool {
 	return !strings.HasPrefix(arg, "'") && !strings.HasPrefix(arg, `"`)
 }
 
-// strftimeIntervalModifierRe matches a SQLite date/time "±NNN unit" modifier (see
-// https://sqlite.org/lang_datefunc.html), e.g. "+1 day", "-30 minutes", "2.5 hours".
-var strftimeIntervalModifierRe = regexp.MustCompile(`(?i)^([+-]?\d+(?:\.\d+)?)\s+(days?|hours?|minutes?|seconds?|months?|years?)$`)
+var strftimeIntervalModifierRe = regexp.MustCompile(`(?i)^([+-]?\d+(?:\.\d+)?)\s+(days?|hours?|minutes?|seconds?)$`)
 
-// strftimeStartOfModifierRe matches a SQLite "start of <unit>" truncation modifier.
 var strftimeStartOfModifierRe = regexp.MustCompile(`(?i)^start of (day|month|year)$`)
 
-// strftimeTimeValueExpr maps a strftime(...) time-value argument (the raw, still-quoted text
-// of the argument as it appeared in the SQLite DEFAULT expression) to the Postgres expression
-// producing the same instant, when it's one of the "current moment" synonyms SQLite
-// recognizes: the literal string 'now', or the bare keywords CURRENT_TIMESTAMP/CURRENT_TIME
-// (both of which SQLite substitutes with the current date+time before strftime ever sees
-// them) or CURRENT_DATE (substituted with today's date, i.e. midnight). Any other argument -
-// a column reference, a literal past/future date, a julian-day number, etc. - returns
-// ("", false) so the caller falls back to the safe literal default rather than guessing.
+// strftimeTimeValueExpr maps the SQLite values that mean "now" without guessing about
+// arbitrary date strings or column references.
 func strftimeTimeValueExpr(arg string) (string, bool) {
 	trimmed := strings.TrimSpace(arg)
 	if strings.HasPrefix(trimmed, "'") || strings.HasPrefix(trimmed, `"`) {
-		// A quoted argument is a literal string SQLite parses as a date/time value; only
-		// the special string 'now' means "the current moment" - any other quoted string
-		// (even one that happens to spell a keyword name) is a literal date to preserve.
 		if strings.ToUpper(strings.Trim(trimmed, `'"`)) == "NOW" {
 			return "now()", true
 		}
 		return "", false
 	}
 	switch strings.ToUpper(trimmed) {
-	case "CURRENT_TIMESTAMP", "CURRENT_TIME":
+	case "CURRENT_TIMESTAMP":
 		return "now()", true
+	case "CURRENT_TIME":
+		return "(TIMESTAMPTZ '2000-01-01 00:00:00+00' + ((now() AT TIME ZONE 'UTC') - date_trunc('day', now() AT TIME ZONE 'UTC')))", true
 	case "CURRENT_DATE":
-		return "CURRENT_DATE", true
+		return utcDateTrunc("day", "now()"), true
 	}
 	return "", false
 }
 
-// applyStrftimeModifiers threads base (a Postgres expression for the strftime time-value,
-// from strftimeTimeValueExpr) through modifiers, SQLite's optional trailing strftime()
-// arguments that shift or truncate the time value (see https://sqlite.org/lang_datefunc.html).
-// Only modifiers with an exact, unambiguous Postgres equivalent are applied:
-//   - "localtime"/"utc" are no-ops here: they only affect how SQLite *renders* the time
-//     value as text, but a TIMESTAMPTZ/numeric-epoch target stores (or derives from) the
-//     absolute instant itself, which a timezone reinterpretation doesn't change.
-//   - "±NNN <unit>" becomes a Postgres interval addition/subtraction.
-//   - "start of day/month/year" becomes date_trunc('<unit>', ...).
-//
-// Any other modifier (weekday N, unixepoch, subsec, julianday, ceiling/floor rounding, ...)
-// returns ok=false for the whole chain - even if earlier modifiers were recognized - so the
-// caller falls back to the safe literal default instead of emitting a default that silently
-// ignores part of the original expression.
 func applyStrftimeModifiers(base string, modifiers []string) (expr string, ok bool) {
 	expr = base
 	for _, raw := range modifiers {
 		mod := strings.Trim(strings.TrimSpace(raw), `'"`)
-		switch {
-		case strings.EqualFold(mod, "localtime"), strings.EqualFold(mod, "utc"):
+		if m := strftimeStartOfModifierRe.FindStringSubmatch(mod); m != nil {
+			expr = utcDateTrunc(strings.ToLower(m[1]), expr)
 			continue
-		case strftimeStartOfModifierRe.MatchString(mod):
-			m := strftimeStartOfModifierRe.FindStringSubmatch(mod)
-			expr = "date_trunc('" + strings.ToLower(m[1]) + "', " + expr + ")"
-		case strftimeIntervalModifierRe.MatchString(mod):
-			m := strftimeIntervalModifierRe.FindStringSubmatch(mod)
-			qty, unit := m[1], strings.ToLower(m[2])
-			sign := "+"
-			switch {
-			case strings.HasPrefix(qty, "-"):
-				sign, qty = "-", qty[1:]
-			case strings.HasPrefix(qty, "+"):
-				qty = qty[1:]
-			}
-			expr = "(" + expr + " " + sign + " interval '" + qty + " " + unit + "')"
-		default:
+		}
+		m := strftimeIntervalModifierRe.FindStringSubmatch(mod)
+		if m == nil {
 			return "", false
 		}
+		qty, unit := m[1], strings.ToLower(m[2])
+		sign := "+"
+		if strings.HasPrefix(qty, "-") {
+			sign, qty = "-", qty[1:]
+		} else {
+			qty = strings.TrimPrefix(qty, "+")
+		}
+		seconds := map[string]int{"second": 1, "seconds": 1, "minute": 60, "minutes": 60, "hour": 3600, "hours": 3600, "day": 86400, "days": 86400}[unit]
+		duration := "make_interval(secs => (" + qty + ")::double precision * " + strconv.Itoa(seconds) + ")"
+		expr = "(" + expr + " " + sign + " " + duration + ")"
 	}
 	return expr, true
 }
 
-// mapStrftimeNowDefault recognizes the common D1/SQLite "current timestamp rendered as text"
-// idiom `strftime(<format>, <time-value> [, modifier...])` (e.g. the ISO-8601
-// `strftime('%Y-%m-%dT%H:%M:%SZ', 'now')` that Drizzle/D1 schemas commonly emit) and maps it
-// to a Postgres equivalent. argList is the raw, comma-separated argument list inside the
-// STRFTIME(...) call.
-//
-// For a TIMESTAMPTZ target, the format string is ignored entirely (Postgres renders the
-// stored value itself, so the original text format no longer applies) and the mapped
-// expression is just the time-value/modifier chain (e.g. now(), or
-// date_trunc('day', now()) + interval '1 day' for "'now', 'start of day', '+1 day'").
-//
-// For a numeric target (BIGINT/INTEGER/DOUBLE PRECISION), only the unix-epoch-seconds format
-// "%s" maps cleanly - to extract(epoch from <time-value>) - since any other format's textual
-// shape can't be represented as a number, and any modifier changes the epoch value in a way
-// this function doesn't attempt to re-derive numerically.
-//
-// Any other target (notably TEXT, where the raw strftime(...) call is still a syntactically
-// valid, if inert, string default) or an unrecognized time-value returns "" so the caller
-// falls back to the safe escaped-literal default. An unrecognized *modifier* on an otherwise
-// recognized TIMESTAMPTZ time-value is handled specially (see the TIMESTAMPTZ case below)
-// rather than falling back to "", because that generic literal fallback is only safe for
-// TEXT - for TIMESTAMPTZ it reproduces the exact "invalid input syntax for type timestamp
-// with time zone" bug this function exists to fix.
 func mapStrftimeNowDefault(argList, pgType string) string {
 	args := splitTopLevelArgs(argList)
 	if len(args) < 2 {
@@ -638,42 +601,51 @@ func mapStrftimeNowDefault(argList, pgType string) string {
 	if !ok {
 		return ""
 	}
+	timeExpr, ok = applyStrftimeModifiers(timeExpr, args[2:])
+	if !ok {
+		return ""
+	}
+	format := strings.Trim(strings.TrimSpace(args[0]), `'"`)
 
 	switch pgType {
 	case "TIMESTAMPTZ":
-		if expr, ok := applyStrftimeModifiers(timeExpr, args[2:]); ok {
-			return expr
-		}
-		// A modifier applyStrftimeModifiers doesn't recognize (e.g. "weekday N") can't be
-		// soundly translated. Falling back to convertDefault's generic escaped-literal
-		// default here would be worse than not mapping at all: for a TIMESTAMPTZ column
-		// that literal is exactly the original "invalid input syntax for type timestamp
-		// with time zone" bug this function exists to fix. Dropping the unrecognized
-		// modifier and keeping the (correctly identified) base time-value expression
-		// trades exactness for guaranteed-valid SQL - the same trade-off the narrower
-		// pre-broadening version of this function made unconditionally for every
-		// modifier. This is a deliberate, narrow fallback, not a silent guess: the
-		// resulting value is only ever off by the specific modifier we couldn't map.
-		return timeExpr
+		return mapStrftimeTimestampFormat(format, timeExpr)
 	case "BIGINT", "INTEGER", "DOUBLE PRECISION":
-		format := strings.Trim(strings.TrimSpace(args[0]), `'"`)
-		if format != "%s" || len(args) > 2 {
+		if format != "%s" {
 			return ""
 		}
-		epochExpr := "extract(epoch from " + timeExpr + ")"
-		if pgType == "DOUBLE PRECISION" {
-			return epochExpr
+		epoch := "floor(extract(epoch from " + timeExpr + "))"
+		switch pgType {
+		case "BIGINT":
+			return epoch + "::bigint"
+		case "INTEGER":
+			return epoch + "::integer"
+		default:
+			return epoch + "::double precision"
 		}
-		return epochExpr + "::bigint"
 	default:
 		return ""
 	}
 }
 
-// splitTopLevelArgs splits a SQL function argument list on commas, ignoring commas that
-// appear inside single- or double-quoted string literals (e.g. a format string like
-// "'%Y,%m'" - not that strftime format strings use commas, but this keeps the split correct
-// for any literal argument).
+func mapStrftimeTimestampFormat(format, expr string) string {
+	switch format {
+	case "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%FT%TZ", "%FT%T", "%F %T":
+		return "date_trunc('second', " + expr + ")"
+	case "%Y-%m-%dT%H:%M:%fZ", "%Y-%m-%dT%H:%M:%f", "%Y-%m-%d %H:%M:%f", "%FT%H:%M:%fZ":
+		return "date_trunc('milliseconds', " + expr + ")"
+	case "%Y-%m-%d", "%F":
+		return utcDateTrunc("day", expr)
+	default:
+		return ""
+	}
+}
+
+func utcDateTrunc(unit, expr string) string {
+	return "date_trunc('" + unit + "', " + expr + " AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
+}
+
+// splitTopLevelArgs splits commas outside quoted strings.
 func splitTopLevelArgs(s string) []string {
 	var args []string
 	inQuote := byte(0)
@@ -693,6 +665,19 @@ func splitTopLevelArgs(s string) []string {
 	}
 	args = append(args, s[start:])
 	return args
+}
+
+func bareSQLiteFunctionArgs(s, name string) (string, bool) {
+	s = unwrapOuterParens(s)
+	open := len(name)
+	if len(s) <= open || !strings.EqualFold(s[:open], name) || s[open] != '(' {
+		return "", false
+	}
+	end, ok := matchingParenEnd(s, open)
+	if !ok || end != len(s)-1 {
+		return "", false
+	}
+	return strings.TrimSpace(s[open+1 : end]), true
 }
 
 func sqliteFunctionArg(s, fn string) string {

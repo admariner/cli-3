@@ -137,20 +137,17 @@ func TestMapSQLiteDefaultFunctionUnixEpoch(t *testing.T) {
 	}
 }
 
-// Bug: strftime('%Y-%m-%dT%H:%M:%SZ', 'now') (the common D1/Drizzle "current timestamp as
-// ISO-8601 text" idiom) was left unmapped and fell into the escaped-literal-string fallback.
-// That's harmless while the column stays TEXT, but once the column is inferred as TIMESTAMPTZ
-// (a timestamp-shaped name plus samples that look like timestamps), the same escaped literal
-// becomes an invalid `timestamp with time zone` value and Postgres rejects the CREATE TABLE.
 func TestMapSQLiteDefaultFunctionStrftimeNow(t *testing.T) {
+	utcDay := "date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
 	cases := map[string]struct {
 		def    string
 		pgType string
 		want   string
 	}{
-		"strftime iso8601 'now' on TIMESTAMPTZ":       {"strftime('%Y-%m-%dT%H:%M:%SZ', 'now')", "TIMESTAMPTZ", "now()"},
-		"parenthesized strftime 'now' on TIMESTAMPTZ": {"(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))", "TIMESTAMPTZ", "now()"},
-		"STRFTIME uppercase 'now' on TIMESTAMPTZ":     {"STRFTIME('%Y-%m-%d', 'NOW')", "TIMESTAMPTZ", "now()"},
+		"strftime iso8601 'now' on TIMESTAMPTZ":       {"strftime('%Y-%m-%dT%H:%M:%SZ', 'now')", "TIMESTAMPTZ", "date_trunc('second', now())"},
+		"parenthesized strftime 'now' on TIMESTAMPTZ": {"(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))", "TIMESTAMPTZ", "date_trunc('second', now())"},
+		"date-only strftime becomes UTC midnight":     {"STRFTIME('%Y-%m-%d', 'NOW')", "TIMESTAMPTZ", utcDay},
+		"unknown format is not guessed":               {"strftime('%Q', 'now')", "TIMESTAMPTZ", ""},
 		"strftime 'now' left unmapped on TEXT":        {"strftime('%Y-%m-%dT%H:%M:%SZ', 'now')", "TEXT", ""},
 		"strftime non-'now' value left unmapped":      {"strftime('%Y-%m-%d', modified_at)", "TIMESTAMPTZ", ""},
 	}
@@ -162,58 +159,57 @@ func TestMapSQLiteDefaultFunctionStrftimeNow(t *testing.T) {
 	}
 }
 
-// TestMapSQLiteDefaultFunctionStrftimeModifiers extends coverage to strftime()'s optional
-// trailing modifier arguments (https://sqlite.org/lang_datefunc.html) and to current-time
-// synonyms other than the literal string 'now' as the time-value argument.
 func TestMapSQLiteDefaultFunctionStrftimeModifiers(t *testing.T) {
+	currentTime := "(TIMESTAMPTZ '2000-01-01 00:00:00+00' + ((now() AT TIME ZONE 'UTC') - date_trunc('day', now() AT TIME ZONE 'UTC')))"
+	utcDay := "date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
 	cases := map[string]struct {
 		def    string
 		pgType string
 		want   string
 	}{
 		"'+1 day' modifier": {
-			"strftime('%Y-%m-%d', 'now', '+1 day')", "TIMESTAMPTZ",
-			"(now() + interval '1 day')",
+			"strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '+1 day')", "TIMESTAMPTZ",
+			"date_trunc('second', (now() + make_interval(secs => (1)::double precision * 86400)))",
 		},
 		"'-30 minutes' modifier": {
-			"strftime('%Y-%m-%d', 'now', '-30 minutes')", "TIMESTAMPTZ",
-			"(now() - interval '30 minutes')",
+			"strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-30 minutes')", "TIMESTAMPTZ",
+			"date_trunc('second', (now() - make_interval(secs => (30)::double precision * 60)))",
 		},
-		"'localtime' modifier is a no-op": {
+		"'localtime' is not guessed": {
 			"strftime('%Y-%m-%dT%H:%M:%SZ', 'now', 'localtime')", "TIMESTAMPTZ",
-			"now()",
+			"",
 		},
-		"'utc' modifier is a no-op": {
+		"'utc' is not guessed": {
 			"strftime('%Y-%m-%dT%H:%M:%SZ', 'now', 'utc')", "TIMESTAMPTZ",
-			"now()",
+			"",
 		},
 		"'start of day' modifier": {
-			"strftime('%Y-%m-%d', 'now', 'start of day')", "TIMESTAMPTZ",
-			"date_trunc('day', now())",
+			"strftime('%Y-%m-%dT%H:%M:%SZ', 'now', 'start of day')", "TIMESTAMPTZ",
+			"date_trunc('second', " + utcDay + ")",
 		},
-		"'start of month' + '+1 month' chained modifiers": {
+		"calendar month arithmetic is not guessed": {
 			"strftime('%Y-%m-%d', 'now', 'start of month', '+1 month')", "TIMESTAMPTZ",
-			"(date_trunc('month', now()) + interval '1 month')",
+			"",
 		},
-		"unrecognized 'weekday N' modifier falls back to the base time-value": {
+		"unrecognized 'weekday N' modifier is not guessed": {
 			"strftime('%Y-%m-%d', 'now', 'weekday 1')", "TIMESTAMPTZ",
-			"now()",
+			"",
 		},
 		"bare CURRENT_TIMESTAMP time-value": {
 			"strftime('%Y-%m-%dT%H:%M:%SZ', CURRENT_TIMESTAMP)", "TIMESTAMPTZ",
-			"now()",
+			"date_trunc('second', now())",
 		},
-		"bare CURRENT_TIME time-value": {
+		"bare CURRENT_TIME uses SQLite's 2000-01-01 date": {
 			"strftime('%Y-%m-%dT%H:%M:%SZ', CURRENT_TIME)", "TIMESTAMPTZ",
-			"now()",
+			"date_trunc('second', " + currentTime + ")",
 		},
 		"bare CURRENT_DATE time-value": {
-			"strftime('%Y-%m-%d', CURRENT_DATE)", "TIMESTAMPTZ",
-			"CURRENT_DATE",
+			"strftime('%Y-%m-%dT%H:%M:%SZ', CURRENT_DATE)", "TIMESTAMPTZ",
+			"date_trunc('second', " + utcDay + ")",
 		},
 		"CURRENT_DATE with '+1 day' modifier": {
-			"strftime('%Y-%m-%d', CURRENT_DATE, '+1 day')", "TIMESTAMPTZ",
-			"(CURRENT_DATE + interval '1 day')",
+			"strftime('%Y-%m-%dT%H:%M:%SZ', CURRENT_DATE, '+1 day')", "TIMESTAMPTZ",
+			"date_trunc('second', (" + utcDay + " + make_interval(secs => (1)::double precision * 86400)))",
 		},
 		"quoted literal date (not 'now') is not a current-time synonym": {
 			"strftime('%Y-%m-%d', '2024-01-01')", "TIMESTAMPTZ",
@@ -221,19 +217,19 @@ func TestMapSQLiteDefaultFunctionStrftimeModifiers(t *testing.T) {
 		},
 		"%s format on BIGINT maps to epoch seconds": {
 			"strftime('%s', 'now')", "BIGINT",
-			"extract(epoch from now())::bigint",
+			"floor(extract(epoch from now()))::bigint",
 		},
 		"%s format on INTEGER maps to epoch seconds": {
 			"strftime('%s', 'now')", "INTEGER",
-			"extract(epoch from now())::bigint",
+			"floor(extract(epoch from now()))::integer",
 		},
 		"%s format on DOUBLE PRECISION maps to epoch seconds": {
 			"strftime('%s', 'now')", "DOUBLE PRECISION",
-			"extract(epoch from now())",
+			"floor(extract(epoch from now()))::double precision",
 		},
-		"%s format with a modifier does not map (epoch not re-derived)": {
+		"%s format applies safe modifiers": {
 			"strftime('%s', 'now', '+1 day')", "BIGINT",
-			"",
+			"floor(extract(epoch from (now() + make_interval(secs => (1)::double precision * 86400))))::bigint",
 		},
 		"non-%s format on BIGINT left unmapped": {
 			"strftime('%Y-%m-%d', 'now')", "BIGINT",
@@ -252,12 +248,6 @@ func TestMapSQLiteDefaultFunctionStrftimeModifiers(t *testing.T) {
 	}
 }
 
-// TestConvertDefaultStrftimeNowOnInferredTimestamp reproduces the reported import failure:
-// ERROR: invalid input syntax for type timestamp with time zone:
-// "(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
-// A timestamp-named TEXT column whose sampled values look like timestamps gets promoted to
-// TIMESTAMPTZ; its strftime('now')-based DEFAULT must be mapped to now(), not quoted as a
-// literal string.
 func TestConvertDefaultStrftimeNowOnInferredTimestamp(t *testing.T) {
 	sql := `CREATE TABLE events (
   id INTEGER PRIMARY KEY,
@@ -272,16 +262,12 @@ INSERT INTO events (id, created_at) VALUES (1, '2024-01-01T00:00:00Z');
 	if strings.Contains(ddl, `'(strftime(`) {
 		t.Fatalf("strftime('now') default was not mapped, still contains broken literal:\n%s", ddl)
 	}
-	if !strings.Contains(ddl, `DEFAULT now()`) {
-		t.Fatalf("expected strftime('now') default to be mapped to now():\n%s", ddl)
+	if !strings.Contains(ddl, `DEFAULT date_trunc('second', now())`) {
+		t.Fatalf("expected strftime('now') default to preserve second precision:\n%s", ddl)
 	}
 	assertValidPostgresDDL(t, ddl)
 }
 
-// TestConvertDefaultStrftimeModifierOnInferredTimestamp is the full-pipeline sibling of
-// TestConvertDefaultStrftimeNowOnInferredTimestamp for the broadened strftime() forms: a
-// modifier-bearing 'now' expression and a bare CURRENT_TIMESTAMP time-value must both produce
-// valid Postgres DEFAULT expressions once the column is inferred as TIMESTAMPTZ.
 func TestConvertDefaultStrftimeModifierOnInferredTimestamp(t *testing.T) {
 	sql := `CREATE TABLE events (
   id INTEGER PRIMARY KEY,
@@ -294,10 +280,10 @@ INSERT INTO events (id, expires_at, starts_at) VALUES (1, '2024-01-02T00:00:00Z'
 	if !strings.Contains(ddl, `"expires_at" TIMESTAMPTZ`) || !strings.Contains(ddl, `"starts_at" TIMESTAMPTZ`) {
 		t.Fatalf("expected both columns to be inferred as TIMESTAMPTZ:\n%s", ddl)
 	}
-	if !strings.Contains(ddl, "DEFAULT (now() + interval '1 day')") {
+	if !strings.Contains(ddl, "DEFAULT date_trunc('second', (now() + make_interval(secs => (1)::double precision * 86400)))") {
 		t.Fatalf("expected +1 day modifier mapped to an interval addition:\n%s", ddl)
 	}
-	if !strings.Contains(ddl, "DEFAULT now()") {
+	if !strings.Contains(ddl, "DEFAULT date_trunc('second', now())") {
 		t.Fatalf("expected bare CURRENT_TIMESTAMP time-value mapped to now():\n%s", ddl)
 	}
 	if strings.Contains(ddl, "strftime(") {
@@ -306,10 +292,6 @@ INSERT INTO events (id, expires_at, starts_at) VALUES (1, '2024-01-02T00:00:00Z'
 	assertValidPostgresDDL(t, ddl)
 }
 
-// TestConvertDefaultStrftimeUnmappableModifierFallsBack guards against emitting broken SQL
-// for a strftime() modifier this package doesn't know how to translate soundly (e.g.
-// "weekday N"). On a plain TEXT column (not inferred as a timestamp) it must fall back to
-// the safe escaped-literal default, exactly like an unrecognized SQLite expression would.
 func TestConvertDefaultStrftimeUnmappableModifierFallsBack(t *testing.T) {
 	sql := `CREATE TABLE events (
   id INTEGER PRIMARY KEY,
@@ -324,15 +306,7 @@ INSERT INTO events (id, next_monday) VALUES (1, '2024-01-01'), (2, '2024-01-08')
 	assertValidPostgresDDL(t, ddl)
 }
 
-// TestConvertDefaultStrftimeUnmappableModifierOnTimestampDropsModifier covers the same
-// unmappable-modifier case as TestConvertDefaultStrftimeUnmappableModifierFallsBack but on a
-// column inferred as TIMESTAMPTZ. There, falling back to the generic escaped-literal default
-// would reproduce the exact "invalid input syntax for type timestamp with time zone" bug this
-// PR fixes (the raw strftime(...) text isn't a valid timestamptz literal), so the safe
-// fallback here is instead to drop the unrecognized modifier and keep the correctly
-// identified base time-value expression (now()) - see the TIMESTAMPTZ case in
-// mapStrftimeNowDefault.
-func TestConvertDefaultStrftimeUnmappableModifierOnTimestampDropsModifier(t *testing.T) {
+func TestConvertDefaultStrftimeUnmappableModifierOnTimestampOmitsDefault(t *testing.T) {
 	sql := `CREATE TABLE events (
   id INTEGER PRIMARY KEY,
   next_monday_at TEXT DEFAULT (strftime('%Y-%m-%d', 'now', 'weekday 1'))
@@ -346,8 +320,24 @@ INSERT INTO events (id, next_monday_at) VALUES (1, '2024-01-01');
 	if strings.Contains(ddl, "strftime(") {
 		t.Fatalf("strftime() must not leak into Postgres DDL:\n%s", ddl)
 	}
-	if !strings.Contains(ddl, "DEFAULT now()") {
-		t.Fatalf("expected the unmappable 'weekday 1' modifier to be dropped, keeping the base now() time-value:\n%s", ddl)
+	column := strings.Split(strings.Split(ddl, `"next_monday_at" TIMESTAMPTZ`)[1], "\n")[0]
+	if strings.Contains(column, "DEFAULT") {
+		t.Fatalf("unsupported strftime modifier must omit the default rather than change its value:\n%s", ddl)
+	}
+	assertValidPostgresDDL(t, ddl)
+}
+
+func TestConvertDefaultStrftimeUnsupportedFormatOmitsDefault(t *testing.T) {
+	sql := `CREATE TABLE events (
+  id INTEGER PRIMARY KEY,
+  created_at TEXT DEFAULT (strftime('%Q', 'now'))
+);
+INSERT INTO events (id, created_at) VALUES (1, '2024-01-01T00:00:00Z');
+`
+	ddl := convertTablesDDL(t, sql)
+	column := strings.Split(strings.Split(ddl, `"created_at" TIMESTAMPTZ`)[1], "\n")[0]
+	if strings.Contains(column, "DEFAULT") {
+		t.Fatalf("unsupported strftime format must omit the default:\n%s", ddl)
 	}
 	assertValidPostgresDDL(t, ddl)
 }
@@ -367,8 +357,8 @@ func TestConvertDefaultDateExpressionNotQuotedAsString(t *testing.T) {
 		"date('now') on TEXT":                      {"date('now')", "TEXT", "CURRENT_DATE"},
 	}
 	for name, tc := range cases {
-		got := convertDefault(tc.def, tc.pgType)
-		if got != tc.want {
+		got, ok := convertDefault(tc.def, tc.pgType)
+		if !ok || got != tc.want {
 			t.Fatalf("%s: convertDefault(%q, %q) = %q, want %q", name, tc.def, tc.pgType, got, tc.want)
 		}
 		if len(got) > 0 && got[0] == '\'' {
@@ -390,8 +380,8 @@ func TestConvertDefaultStringLiteralsStillQuoted(t *testing.T) {
 		"bare text default gets quoted": {"foo", "TEXT", "'foo'"},
 	}
 	for name, tc := range cases {
-		got := convertDefault(tc.def, tc.pgType)
-		if got != tc.want {
+		got, ok := convertDefault(tc.def, tc.pgType)
+		if !ok || got != tc.want {
 			t.Fatalf("%s: convertDefault(%q, %q) = %q, want %q", name, tc.def, tc.pgType, got, tc.want)
 		}
 	}

@@ -2,6 +2,7 @@ package d1
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/planetscale/cli/internal/postgres"
@@ -91,9 +92,7 @@ func convertNamedConstraint(clause string, table TableSchema, all []TableSchema,
 // convertCheckConstraint converts a table-level `CHECK (expr)` clause, re-quoting any
 // identifiers inside expr that reference the table's columns (so mixed-case column names
 // survive Postgres's case-folding of unquoted identifiers) and converting SQLite's
-// double-quoted string-literal fallback into proper single-quoted literals. ctx (when
-// non-nil) is used to detect columns that will be coerced to Postgres BOOLEAN, so literal
-// 0/1 comparisons against them can be rewritten to false/true (see convertCheckExpr).
+// double-quoted string-literal fallback into proper single-quoted literals.
 func convertCheckConstraint(clause string, table TableSchema, ctx *TypeCoercionContext) string {
 	clause = strings.TrimSpace(clause)
 	clause = strings.TrimSuffix(clause, ",")
@@ -143,11 +142,7 @@ var checkExprKeywords = map[string]struct{}{
 //     that Postgres rejects — are converted to double-quoted identifiers, canonicalized
 //     to the column's declared case when they match one.
 //   - single-quoted string literals and everything else are passed through unchanged.
-//
-// When ctx is non-nil, a second pass (see rewriteBooleanCheckLiterals) rewrites literal 0/1
-// comparisons against columns that will be coerced to Postgres BOOLEAN (e.g. `is_active = 1`
-// or `is_active IN (0,1)`), since SQLite's INTEGER 0/1 booleans are never valid literals
-// against a BOOLEAN column in Postgres.
+//   - 0/1 values compared with coerced BOOLEAN columns become false/true.
 func convertCheckExpr(expr string, table TableSchema, ctx *TypeCoercionContext) string {
 	colMap := make(map[string]string, len(table.Columns))
 	for _, col := range table.Columns {
@@ -268,255 +263,105 @@ func canonicalIdent(ident string, colMap map[string]string) string {
 	return ident
 }
 
-// booleanCoercedColumnNames returns the lower-cased names of table's columns that
-// sqliteTypeToPostgres/isBooleanLikeColumn will coerce to Postgres BOOLEAN. Returns nil
-// (rather than an empty, non-nil map) when ctx is nil or no column qualifies, so callers can
-// use a plain length check to skip the boolean CHECK-literal rewrite pass entirely.
-func booleanCoercedColumnNames(table TableSchema, ctx *TypeCoercionContext) map[string]struct{} {
+func booleanCoercedColumnNames(table TableSchema, ctx *TypeCoercionContext) []string {
 	if ctx == nil {
 		return nil
 	}
-	var cols map[string]struct{}
+	var cols []string
 	for _, col := range table.Columns {
 		if isBooleanLikeColumn(col, table, ctx) {
-			if cols == nil {
-				cols = make(map[string]struct{}, len(table.Columns))
-			}
-			cols[strings.ToLower(col.Name)] = struct{}{}
+			cols = append(cols, col.Name)
 		}
 	}
 	return cols
 }
 
-// ceTokKind classifies a token produced by tokenizeConvertedExpr, the minimal tokenizer used
-// by rewriteBooleanCheckLiterals to locate literal 0/1 operands next to a boolean-coerced
-// column reference in an already-converted CHECK expression (column references are always
-// double-quoted at this point, see convertCheckExpr).
-type ceTokKind int
+// rewriteBooleanCheckLiterals runs only after column names have been normalized and quoted.
+func rewriteBooleanCheckLiterals(expr string, boolCols []string) string {
+	idents := make([]string, len(boolCols))
+	for i, col := range boolCols {
+		idents[i] = regexp.QuoteMeta(postgres.QuoteIdentifier(col))
+	}
+	ident := `(?:` + strings.Join(idents, `|`) + `)`
+	literals := []struct{ from, to string }{{"0", "false"}, {"1", "true"}}
+	left := make([]*regexp.Regexp, len(literals))
+	right := make([]*regexp.Regexp, len(literals))
+	isLeft := make([]*regexp.Regexp, len(literals))
+	isRight := make([]*regexp.Regexp, len(literals))
+	equalLeft := make([]*regexp.Regexp, len(literals))
+	equalRight := make([]*regexp.Regexp, len(literals))
+	for i, literal := range literals {
+		left[i] = regexp.MustCompile(`(` + ident + `\s*(?:=|<>|!=|<=|>=|<|>)\s*)` + literal.from + `\b`)
+		right[i] = regexp.MustCompile(`\b` + literal.from + `(\s*(?:=|<>|!=|<=|>=|<|>)\s*` + ident + `)`)
+		isLeft[i] = regexp.MustCompile(`(` + ident + `\s+(?i:IS(?:\s+NOT)?(?:\s+DISTINCT\s+FROM)?)\s*)` + literal.from + `\b`)
+		isRight[i] = regexp.MustCompile(`\b` + literal.from + `\s+(?i:(IS(?:\s+NOT)?(?:\s+DISTINCT\s+FROM)?))\s*(` + ident + `)`)
+		equalLeft[i] = regexp.MustCompile(`(` + ident + `\s*)==(\s*)` + literal.from + `\b`)
+		equalRight[i] = regexp.MustCompile(`\b` + literal.from + `(\s*)==(\s*` + ident + `)`)
+	}
+	in := regexp.MustCompile(`(` + ident + `\s+(?i:(?:NOT\s+)?IN)\s*\()(\s*[01](?:\s*,\s*[01])*\s*)(\))`)
+	between := regexp.MustCompile(`(` + ident + `\s+(?i:(?:NOT\s+)?BETWEEN)\s+)([01])(\s+(?i:AND)\s+)([01])\b`)
+	replaceList := strings.NewReplacer("0", "false", "1", "true")
 
-const (
-	ceTokOther ceTokKind = iota
-	ceTokWS
-	ceTokString // '...'
-	ceTokQIdent // "..." (a quoted identifier - always a column reference post-conversion)
-	ceTokNumber // bare digit run, e.g. "0", "1", "42"
-	ceTokWord   // bare word, e.g. IN, NOT, AND, a function name
-	ceTokOp     // "=", "<>", "!="
-	ceTokComma  // ","
-	ceTokLParen // "("
-	ceTokRParen // ")"
-)
-
-type ceTok struct {
-	kind ceTokKind
-	text string
-}
-
-func isDigitByte(c byte) bool {
-	return c >= '0' && c <= '9'
-}
-
-func isSpaceByte(c byte) bool {
-	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
-}
-
-// tokenizeConvertedExpr tokenizes an already-converted CHECK expression (as produced by the
-// main convertCheckExpr scan) just enough to let rewriteBooleanCheckLiterals find literal
-// 0/1 operands next to quoted column references. It does not need to handle SQLite's raw
-// quoting variants (brackets, backticks, double-quoted string fallback) since convertCheckExpr
-// has already normalized those away.
-func tokenizeConvertedExpr(s string) []ceTok {
-	var toks []ceTok
-	n := len(s)
-	for i := 0; i < n; {
-		c := s[i]
-		switch {
-		case isSpaceByte(c):
-			j := i + 1
-			for j < n && isSpaceByte(s[j]) {
-				j++
-			}
-			toks = append(toks, ceTok{ceTokWS, s[i:j]})
-			i = j
-		case c == '\'':
-			j := i + 1
-			for j < n {
-				if s[j] == '\'' {
-					if j+1 < n && s[j+1] == '\'' {
-						j += 2
-						continue
-					}
-					j++
-					break
-				}
-				j++
-			}
-			toks = append(toks, ceTok{ceTokString, s[i:j]})
-			i = j
-		case c == '"':
-			j := i + 1
-			for j < n {
-				if s[j] == '"' {
-					if j+1 < n && s[j+1] == '"' {
-						j += 2
-						continue
-					}
-					j++
-					break
-				}
-				j++
-			}
-			toks = append(toks, ceTok{ceTokQIdent, s[i:j]})
-			i = j
-		case isDigitByte(c):
-			j := i + 1
-			for j < n && isDigitByte(s[j]) {
-				j++
-			}
-			toks = append(toks, ceTok{ceTokNumber, s[i:j]})
-			i = j
-		case isIdentStartByte(c):
-			j := i + 1
-			for j < n && isSQLIdentChar(s[j]) {
-				j++
-			}
-			toks = append(toks, ceTok{ceTokWord, s[i:j]})
-			i = j
-		case c == '<' && i+1 < n && s[i+1] == '>':
-			toks = append(toks, ceTok{ceTokOp, "<>"})
-			i += 2
-		case c == '!' && i+1 < n && s[i+1] == '=':
-			toks = append(toks, ceTok{ceTokOp, "!="})
-			i += 2
-		case c == '=':
-			toks = append(toks, ceTok{ceTokOp, "="})
-			i++
-		case c == ',':
-			toks = append(toks, ceTok{ceTokComma, ","})
-			i++
-		case c == '(':
-			toks = append(toks, ceTok{ceTokLParen, "("})
-			i++
-		case c == ')':
-			toks = append(toks, ceTok{ceTokRParen, ")"})
-			i++
-		default:
-			toks = append(toks, ceTok{ceTokOther, s[i : i+1]})
-			i++
+	return rewriteOutsideStringLiterals(expr, func(sql string) string {
+		for i, literal := range literals {
+			sql = left[i].ReplaceAllString(sql, `${1}`+literal.to)
+			sql = right[i].ReplaceAllString(sql, literal.to+`${1}`)
+			sql = isLeft[i].ReplaceAllString(sql, `${1}`+literal.to)
+			sql = isRight[i].ReplaceAllString(sql, `${2} ${1} `+literal.to)
+			sql = equalLeft[i].ReplaceAllString(sql, `${1}=${2}`+literal.to)
+			sql = equalRight[i].ReplaceAllString(sql, literal.to+`${1}=${2}`)
 		}
-	}
-	return toks
+		sql = in.ReplaceAllStringFunc(sql, func(match string) string {
+			parts := in.FindStringSubmatch(match)
+			return parts[1] + replaceList.Replace(parts[2]) + parts[3]
+		})
+		return between.ReplaceAllStringFunc(sql, func(match string) string {
+			parts := between.FindStringSubmatch(match)
+			return parts[1] + replaceList.Replace(parts[2]) + parts[3] + replaceList.Replace(parts[4])
+		})
+	})
 }
 
-// unquoteQIdent strips the surrounding double quotes from a ceTokQIdent's text and
-// un-escapes doubled internal quotes, e.g. `"is_active"` -> `is_active`.
-func unquoteQIdent(text string) string {
-	if len(text) >= 2 && strings.HasPrefix(text, `"`) && strings.HasSuffix(text, `"`) {
-		return strings.ReplaceAll(text[1:len(text)-1], `""`, `"`)
-	}
-	return text
-}
-
-// boolLiteralFor maps a SQLite 0/1 integer literal token to the Postgres boolean literal it
-// represents, or ("", false) for any other value (only exactly "0" or "1" - a boolean-coerced
-// column never legitimately compares against any other integer).
-func boolLiteralFor(tok ceTok) (string, bool) {
-	if tok.kind != ceTokNumber {
-		return "", false
-	}
-	switch tok.text {
-	case "0":
-		return "false", true
-	case "1":
-		return "true", true
-	}
-	return "", false
-}
-
-// rewriteBooleanCheckLiterals rewrites literal SQLite 0/1 integer comparisons against
-// boolCols (lower-cased column names already known to be coerced to Postgres BOOLEAN) into
-// proper Postgres boolean literals, e.g.:
-//
-//	"is_active" = 1        -> "is_active" = true
-//	"is_active" <> 0        -> "is_active" <> false
-//	0 = "is_active"         -> false = "is_active"
-//	"is_active" IN (0, 1)   -> "is_active" IN (false, true)
-//
-// Only literal 0/1 operands directly adjacent (across whitespace) to a boolCols reference via
-// a comparison operator or an IN(...) list are rewritten; everything else - including
-// comparisons on any other column - passes through unchanged.
-func rewriteBooleanCheckLiterals(expr string, boolCols map[string]struct{}) string {
-	toks := tokenizeConvertedExpr(expr)
-	n := len(toks)
-
-	nextNonWS := func(i int) int {
-		for j := i + 1; j < n; j++ {
-			if toks[j].kind != ceTokWS {
-				return j
-			}
-		}
-		return -1
-	}
-
-	isBoolColumn := func(tok ceTok) bool {
-		if tok.kind != ceTokQIdent {
-			return false
-		}
-		_, ok := boolCols[strings.ToLower(unquoteQIdent(tok.text))]
-		return ok
-	}
-
-	for i := 0; i < n; i++ {
-		if isBoolColumn(toks[i]) {
-			j := nextNonWS(i)
-			if j < 0 {
-				continue
-			}
-			switch {
-			case toks[j].kind == ceTokOp:
-				if k := nextNonWS(j); k >= 0 {
-					if repl, ok := boolLiteralFor(toks[k]); ok {
-						toks[k].text = repl
-					}
-				}
-			case toks[j].kind == ceTokWord && strings.EqualFold(toks[j].text, "IN"):
-				if k := nextNonWS(j); k >= 0 && toks[k].kind == ceTokLParen {
-					depth := 1
-					for m := k + 1; m < n && depth > 0; m++ {
-						switch toks[m].kind {
-						case ceTokLParen:
-							depth++
-						case ceTokRParen:
-							depth--
-						case ceTokNumber:
-							if depth == 1 {
-								if repl, ok := boolLiteralFor(toks[m]); ok {
-									toks[m].text = repl
-								}
-							}
-						}
-					}
-				}
-			}
-			continue
-		}
-
-		// Reversed operand order: <literal> <op> <bool column>.
-		if repl, ok := boolLiteralFor(toks[i]); ok {
-			j := nextNonWS(i)
-			if j >= 0 && toks[j].kind == ceTokOp {
-				if k := nextNonWS(j); k >= 0 && isBoolColumn(toks[k]) {
-					toks[i].text = repl
-				}
-			}
-		}
-	}
-
+// rewriteOutsideStringLiterals leaves quoted text alone while rewriting SQL around it.
+func rewriteOutsideStringLiterals(expr string, rewrite func(string) string) string {
 	var out strings.Builder
-	for _, t := range toks {
-		out.WriteString(t.text)
+	for len(expr) > 0 {
+		start, end := nextStringLiteral(expr)
+		if start < 0 {
+			out.WriteString(rewrite(expr))
+			break
+		}
+		out.WriteString(rewrite(expr[:start]))
+		out.WriteString(expr[start:end])
+		expr = expr[end:]
 	}
 	return out.String()
+}
+
+func nextStringLiteral(expr string) (int, int) {
+	for i := 0; i < len(expr); i++ {
+		switch expr[i] {
+		case '"':
+			i = quotedEnd(expr, i, '"') - 1
+		case '\'':
+			return i, quotedEnd(expr, i, '\'')
+		}
+	}
+	return -1, -1
+}
+
+func quotedEnd(s string, start int, quote byte) int {
+	for i := start + 1; i < len(s); i++ {
+		if s[i] != quote {
+			continue
+		}
+		if i+1 < len(s) && s[i+1] == quote {
+			i++
+			continue
+		}
+		return i + 1
+	}
+	return len(s)
 }
 
 func convertForeignKeyConstraint(clause string, table TableSchema, all []TableSchema) string {
@@ -756,10 +601,8 @@ func columnFKTarget(col ColumnSchema, table TableSchema) (string, string) {
 	}
 	for _, constraint := range table.Constraints {
 		cols, refs := parseTableLevelForeignKey(constraint)
-		for _, name := range cols {
-			if name == col.Name {
-				return parseReferencesTarget(refs)
-			}
+		if slices.Contains(cols, col.Name) {
+			return parseReferencesTarget(refs)
 		}
 	}
 	return "", ""

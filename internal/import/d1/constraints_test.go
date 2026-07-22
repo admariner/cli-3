@@ -213,9 +213,6 @@ func TestConvertCheckExprBracketAndBacktickIdentifiers(t *testing.T) {
 	assertValidPostgresDDL(t, ddl)
 }
 
-// booleanColumnCtx returns a TypeCoercionContext whose sampled values make columns (in
-// table t) look boolean-like per isBooleanLikeColumn (i.e. every sampled value is "0" or
-// "1"), for tests exercising convertCheckExpr's boolean CHECK-literal rewrite.
 func booleanColumnCtx(columns ...string) *TypeCoercionContext {
 	cols := make(map[string][]string, len(columns))
 	for _, c := range columns {
@@ -224,11 +221,6 @@ func booleanColumnCtx(columns ...string) *TypeCoercionContext {
 	return &TypeCoercionContext{Samples: ColumnSamples{"t": cols}}
 }
 
-// TestConvertCheckExprBooleanLiteralRewrite covers convertCheckExpr's rewrite of literal
-// SQLite 0/1 integer comparisons against a column that will be coerced to Postgres BOOLEAN
-// (bug: `CHECK (is_active IN (0,1))` on an integer column coerced to boolean produces
-// invalid Postgres DDL - `IN (0,1)` against a boolean operand - unless the literals are
-// rewritten to true/false).
 func TestConvertCheckExprBooleanLiteralRewrite(t *testing.T) {
 	table := TableSchema{Name: "t", Columns: []ColumnSchema{
 		{Name: "is_active", Type: "INTEGER"},
@@ -237,37 +229,43 @@ func TestConvertCheckExprBooleanLiteralRewrite(t *testing.T) {
 	ctx := booleanColumnCtx("is_active")
 
 	cases := map[string]string{
-		"is_active = 1":          `"is_active" = true`,
-		"is_active = 0":          `"is_active" = false`,
-		"is_active <> 0":         `"is_active" <> false`,
-		"is_active != 1":         `"is_active" != true`,
-		"0 = is_active":          `false = "is_active"`,
-		"1 <> is_active":         `true <> "is_active"`,
-		"is_active IN (0, 1)":    `"is_active" IN (false, true)`,
-		"is_active IN (1,0)":     `"is_active" IN (true,false)`,
-		"NOT is_active IN (0,1)": `NOT "is_active" IN (false,true)`,
-		// A non-boolean-coerced column must never be touched, even with the same 0/1
-		// literal shape.
-		"other = 1": `"other" = 1`,
-		"other = 0": `"other" = 0`,
-		// A boolean-coerced column compared against any literal other than 0/1 is left
-		// alone: it isn't a value isBooleanLikeColumn's SQLite-truthiness model covers.
-		"is_active = 2": `"is_active" = 2`,
-		// Combined with another condition on a non-boolean column - only the boolean
-		// column's literal must be rewritten.
-		"is_active = 1 AND other = 1": `"is_active" = true AND "other" = 1`,
+		"is_active = 1":                `"is_active" = true`,
+		"is_active = 0":                `"is_active" = false`,
+		"is_active <> 0":               `"is_active" <> false`,
+		"is_active != 1":               `"is_active" != true`,
+		"is_active <= 1":               `"is_active" <= true`,
+		"is_active IS 1":               `"is_active" IS true`,
+		"is_active IS NOT 0":           `"is_active" IS NOT false`,
+		"is_active IS DISTINCT FROM 1": `"is_active" IS DISTINCT FROM true`,
+		"is_active == 1":               `"is_active" = true`,
+		"0 = is_active":                `false = "is_active"`,
+		"1 <> is_active":               `true <> "is_active"`,
+		"1 IS is_active":               `"is_active" IS true`,
+		"0 IS NOT is_active":           `"is_active" IS NOT false`,
+		"1 == is_active":               `true = "is_active"`,
+		"is_active IN (0, 1)":          `"is_active" IN (false, true)`,
+		"is_active NOT IN (0, 1)":      `"is_active" NOT IN (false, true)`,
+		"is_active BETWEEN 0 AND 1":    `"is_active" BETWEEN false AND true`,
+		"is_active IN (1,0)":           `"is_active" IN (true,false)`,
+		"NOT is_active IN (0,1)":       `NOT "is_active" IN (false,true)`,
+		"other = 1":                    `"other" = 1`,
+		"other = 0":                    `"other" = 0`,
+		"is_active = 2":                `"is_active" = 2`,
+		"is_active = 1 AND other = 1":  `"is_active" = true AND "other" = 1`,
+		"other = 'is_active = 1'":      `"other" = 'is_active = 1'`,
 	}
 	for expr, want := range cases {
 		if got := convertCheckExpr(expr, table, ctx); got != want {
 			t.Errorf("convertCheckExpr(%q) = %q, want %q", expr, got, want)
 		}
 	}
+
+	quotedTable := TableSchema{Name: "t", Columns: []ColumnSchema{{Name: "is'active", Type: "INTEGER"}}}
+	if got := convertCheckExpr("[is'active] = 1", quotedTable, booleanColumnCtx("is'active")); got != `"is'active" = true` {
+		t.Fatalf("quoted column: got %q", got)
+	}
 }
 
-// TestConvertCheckExprBooleanRewriteRequiresContext guards against the boolean CHECK-literal
-// rewrite firing without a TypeCoercionContext to confirm the column is actually
-// boolean-coerced (e.g. a schema-only dump with no sampled rows) - convertCheckExpr must
-// leave 0/1 literals untouched in that case, exactly as it always has.
 func TestConvertCheckExprBooleanRewriteRequiresContext(t *testing.T) {
 	table := TableSchema{Name: "t", Columns: []ColumnSchema{{Name: "is_active", Type: "INTEGER"}}}
 	got := convertCheckExpr("is_active IN (0, 1)", table, nil)
@@ -277,11 +275,6 @@ func TestConvertCheckExprBooleanRewriteRequiresContext(t *testing.T) {
 	}
 }
 
-// TestConvertCheckConstraintBooleanLiteralRewrite reproduces the original bug report at the
-// convertCheckConstraint/full-DDL level: CHECK (is_active IN (0,1)) on a column whose sampled
-// values are only 0/1 gets coerced to BOOLEAN, and the CHECK constraint's literals must be
-// rewritten alongside it so the generated DDL is valid Postgres. Covers both the table-level
-// and column-level CHECK forms, and is verified against a real local Postgres instance.
 func TestConvertCheckConstraintBooleanLiteralRewrite(t *testing.T) {
 	sql := `CREATE TABLE t (
   id INTEGER PRIMARY KEY,
@@ -314,12 +307,20 @@ INSERT INTO t2 (id, is_active) VALUES (1, 0), (2, 1);
 		t.Fatalf("expected column-level CHECK literals rewritten to boolean literals:\n%s", ddl)
 	}
 	assertValidPostgresDDL(t, ddl)
+
+	sql = `CREATE TABLE t3 (
+  id INTEGER PRIMARY KEY,
+  is_active INTEGER NOT NULL DEFAULT 0 CHECK (is_active IS 0 OR is_active NOT IN (0,1))
+);
+INSERT INTO t3 (id, is_active) VALUES (1, 0), (2, 1);
+`
+	ddl = convertTablesDDL(t, sql)
+	if !strings.Contains(ddl, `CHECK ("is_active" IS false OR "is_active" NOT IN (false,true))`) {
+		t.Fatalf("expected IS and NOT IN literals rewritten to boolean literals:\n%s", ddl)
+	}
+	assertValidPostgresDDL(t, ddl)
 }
 
-// TestConvertCheckConstraintBooleanLiteralRewriteIgnoresNonBooleanColumn guards against the
-// rewrite firing on a same-shaped CHECK for a column that ISN'T coerced to boolean (e.g. its
-// sampled values include something other than 0/1), which must keep its original integer
-// comparison untouched.
 func TestConvertCheckConstraintBooleanLiteralRewriteIgnoresNonBooleanColumn(t *testing.T) {
 	sql := `CREATE TABLE t (
   id INTEGER PRIMARY KEY,
