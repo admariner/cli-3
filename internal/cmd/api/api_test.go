@@ -65,108 +65,78 @@ func TestParseField(t *testing.T) {
 	}
 }
 
-func TestExtractRootDomain(t *testing.T) {
-	tests := []struct {
-		name string
-		host string
-		want string
-	}{
-		{
-			name: "simple domain",
-			host: "example.com",
-			want: "example.com",
-		},
-		{
-			name: "subdomain",
-			host: "api.example.com",
-			want: "example.com",
-		},
-		{
-			name: "multiple subdomains",
-			host: "v1.api.example.com",
-			want: "example.com",
-		},
-		{
-			name: "with port",
-			host: "example.com:8080",
-			want: "example.com",
-		},
-		{
-			name: "subdomain with port",
-			host: "api.example.com:8080",
-			want: "example.com",
-		},
-		{
-			name: "localhost",
-			host: "localhost",
-			want: "localhost",
-		},
-		{
-			name: "localhost with port",
-			host: "localhost:8080",
-			want: "localhost",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := extractRootDomain(tt.host)
-			require.Equal(t, tt.want, got)
-		})
-	}
-}
-
 func TestRedirectCheck(t *testing.T) {
 	tests := []struct {
 		name                  string
 		originalHost          string
-		redirectHost          string
+		redirectURL           string
 		expectUseLastResponse bool
 	}{
 		{
-			name:                  "same domain",
+			name:                  "exact same host",
 			originalHost:          "api.example.com",
-			redirectHost:          "www.example.com",
+			redirectURL:           "https://api.example.com/path",
 			expectUseLastResponse: false,
+		},
+		{
+			name:                  "same host different port still same hostname",
+			originalHost:          "api.example.com",
+			redirectURL:           "https://api.example.com:443/path",
+			expectUseLastResponse: false,
+		},
+		{
+			name:                  "case-insensitive hostname match",
+			originalHost:          "API.Example.Com",
+			redirectURL:           "https://api.example.com/path",
+			expectUseLastResponse: false,
+		},
+		{
+			name:                  "sibling subdomain is not same host",
+			originalHost:          "api.planetscale.com",
+			redirectURL:           "https://evil.planetscale.com/path",
+			expectUseLastResponse: true,
+		},
+		{
+			name:                  "www sibling of api host",
+			originalHost:          "api.example.com",
+			redirectURL:           "https://www.example.com/path",
+			expectUseLastResponse: true,
 		},
 		{
 			name:                  "different domain",
 			originalHost:          "api.example.com",
-			redirectHost:          "api.another.com",
+			redirectURL:           "https://api.another.com/path",
 			expectUseLastResponse: true,
 		},
 		{
 			name:                  "localhost to domain",
-			originalHost:          "localhost:8080",
-			redirectHost:          "example.com",
+			originalHost:          "localhost",
+			redirectURL:           "https://example.com/path",
 			expectUseLastResponse: true,
 		},
 		{
 			name:                  "domain to localhost",
 			originalHost:          "example.com",
-			redirectHost:          "localhost:8080",
+			redirectURL:           "http://localhost:8080/path",
 			expectUseLastResponse: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			originalDomain := extractRootDomain(tt.originalHost)
-			redirectCheck := makeRedirectCheck(originalDomain)
+			redirectCheck := makeRedirectCheck(tt.originalHost)
 
-			// Create a test request simulating a redirect
-			req, _ := http.NewRequest("GET", "https://"+tt.redirectHost+"/path", nil)
+			req, err := http.NewRequest("GET", tt.redirectURL, nil)
+			require.NoError(t, err)
 
-			// Run the redirect check
-			err := redirectCheck(req, []*http.Request{})
+			err = redirectCheck(req, []*http.Request{})
 
-			// Check the result
 			if tt.expectUseLastResponse {
 				require.Equal(t, http.ErrUseLastResponse, err,
-					"Expected ErrUseLastResponse for cross-domain redirect")
+					"Expected ErrUseLastResponse for cross-host redirect")
 			} else {
 				require.NoError(t, err,
-					"Expected nil error for same-domain redirect")
+					"Expected nil error for same-host redirect")
 			}
 		})
 	}
@@ -175,7 +145,7 @@ func TestRedirectCheck(t *testing.T) {
 func TestHandleRedirect(t *testing.T) {
 	ctx := context.Background()
 
-	// Cross-domain redirects must not carry credentials or user-supplied headers
+	// Cross-host redirects must not carry credentials or user-supplied headers
 	// from the original request (Authorization, Cookie, X-Api-Key, etc.).
 	credentialHeaders := []string{
 		"Authorization",
@@ -187,7 +157,7 @@ func TestHandleRedirect(t *testing.T) {
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for _, name := range credentialHeaders {
 			require.Empty(t, r.Header.Get(name),
-				"credential header %q must not be present on cross-domain redirect request", name)
+				"credential header %q must not be present on cross-host redirect request", name)
 		}
 		// Accept is a common original-request header; it must not be forwarded.
 		require.Empty(t, r.Header.Get("Accept"))

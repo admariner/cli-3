@@ -151,9 +151,12 @@ func ApiCmd(ch *cmdutil.Helper, userAgent string, defaultHeaders map[string]stri
 			}
 		}
 
-		// Store the original domain for detecting cross-domain redirects
-		originalDomain := extractRootDomain(req.URL.Host)
-		redirectCheck := makeRedirectCheck(originalDomain)
+		// Only the exact API host may receive credentials on redirects.
+		// The oauth2 transport attaches Authorization to every hop, so we
+		// must refuse redirects to sibling subdomains (and any other host)
+		// and follow those without auth via handleRedirect.
+		originalHost := req.URL.Hostname()
+		redirectCheck := makeRedirectCheck(originalHost)
 
 		var cl *http.Client
 		if ch.Config.AccessToken != "" {
@@ -162,7 +165,7 @@ func ApiCmd(ch *cmdutil.Helper, userAgent string, defaultHeaders map[string]stri
 			cl = oauth2.NewClient(ctx, oauth2.StaticTokenSource(tok))
 
 			// Set our custom redirect policy
-			cl.CheckRedirect = makeRedirectCheck(originalDomain)
+			cl.CheckRedirect = redirectCheck
 		} else if ch.Config.ServiceToken != "" && ch.Config.ServiceTokenID != "" {
 			// For service tokens, manually set the auth header
 			req.Header.Set("Authorization", ch.Config.ServiceTokenID+":"+ch.Config.ServiceToken)
@@ -214,18 +217,17 @@ func ApiCmd(ch *cmdutil.Helper, userAgent string, defaultHeaders map[string]stri
 	return cmd
 }
 
-// Create a custom redirect check function that blocks cross-domain redirects.
-// The OAuth2 transport adds the Authorization header to every
-// request, even after a cross-domain redirect, which is really bad.
-// So we detect cross-domain redirects and handle them with a
-// separate, auth-less http.Client.
-func makeRedirectCheck(originalDomain string) func(req *http.Request, via []*http.Request) error {
+// makeRedirectCheck blocks redirects away from the exact original host.
+// The OAuth2 transport adds the Authorization header to every request,
+// including after redirects, so we only auto-follow when the hostname
+// matches the configured API host. Other hosts are handled by
+// handleRedirect with a separate, auth-less http.Client.
+func makeRedirectCheck(originalHost string) func(req *http.Request, via []*http.Request) error {
+	originalHost = strings.ToLower(originalHost)
 	return func(req *http.Request, via []*http.Request) error {
-		// Check if this is a redirect to a different domain
-		currentDomain := extractRootDomain(req.URL.Host)
-		if originalDomain != currentDomain {
-			// For cross-domain redirects, don't follow automatically
-			// We'll handle this manually without sending auth headers
+		if originalHost != strings.ToLower(req.URL.Hostname()) {
+			// Different host (including sibling subdomains): do not follow
+			// with the credential-bearing client.
 			return http.ErrUseLastResponse
 		}
 
@@ -389,7 +391,7 @@ func parseValue(s string) (interface{}, error) {
 	return v, json.Unmarshal([]byte(s), &v)
 }
 
-// handleRedirect follows a cross-domain redirect without forwarding credentials
+// handleRedirect follows a cross-host redirect without forwarding credentials
 // or user-supplied headers. Users may put secrets in arbitrary --header/-H
 // values (Cookie, X-Api-Key, etc.), so the redirect request is created fresh
 // and must not copy headers from the original request.
@@ -400,7 +402,7 @@ func handleRedirect(ctx context.Context, location string, debug bool) (*http.Res
 	}
 
 	if debug {
-		fmt.Fprintf(os.Stderr, "Following cross-domain redirect to %s without original request headers\n", location)
+		fmt.Fprintf(os.Stderr, "Following cross-host redirect to %s without original request headers\n", location)
 	}
 
 	redirectClient := &http.Client{}
@@ -410,20 +412,4 @@ func handleRedirect(ctx context.Context, location string, debug bool) (*http.Res
 	}
 
 	return redirectRes, nil
-}
-
-// extractRootDomain gets the root domain from a host string.  This just
-// assumes that the last two parts of the domain name are the root domain,
-// which is fine for planetscale.com but would break down under compound
-// TLDs like .co.uk.
-func extractRootDomain(host string) string {
-	// Remove port if present
-	host, _, _ = strings.Cut(host, ":")
-
-	parts := strings.Split(host, ".")
-	if len(parts) <= 2 {
-		return host
-	}
-
-	return strings.Join(parts[len(parts)-2:], ".")
 }
