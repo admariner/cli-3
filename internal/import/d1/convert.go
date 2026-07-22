@@ -390,6 +390,11 @@ func mapSQLiteDefaultFunction(def, pgType string) string {
 			return mapped
 		}
 	}
+	if arg := sqliteFunctionArg(trimmed, "STRFTIME"); arg != "" {
+		if mapped := mapStrftimeNowDefault(arg, pgType); mapped != "" {
+			return mapped
+		}
+	}
 	if arg := sqliteFunctionArg(trimmed, "JULIANDAY"); arg != "" || strings.HasSuffix(upper, "JULIANDAY()") {
 		modifier := strings.ToUpper(strings.Trim(strings.TrimSpace(arg), `'"`))
 		if modifier == "" || modifier == "NOW" {
@@ -522,6 +527,55 @@ func unixEpochArgLooksNumeric(arg string) bool {
 		return true
 	}
 	return !strings.HasPrefix(arg, "'") && !strings.HasPrefix(arg, `"`)
+}
+
+// mapStrftimeNowDefault recognizes the common D1/SQLite "current timestamp rendered as text"
+// idiom `strftime(<format>, 'now' [, modifier...])` (e.g. the ISO-8601
+// `strftime('%Y-%m-%dT%H:%M:%SZ', 'now')` that Drizzle/D1 schemas commonly emit) and maps it
+// to Postgres now(). argList is the raw, comma-separated argument list inside the STRFTIME(...)
+// call (everything but the format string is ignored: once the column is inferred as
+// TIMESTAMPTZ, Postgres renders the value itself, so the original text format no longer
+// applies). Only mapped when pgType is TIMESTAMPTZ - for any other target type (notably TEXT,
+// where the raw strftime(...) call is still a syntactically valid, if inert, string default)
+// this intentionally returns "" so the caller falls back to the safe escaped-literal default.
+func mapStrftimeNowDefault(argList, pgType string) string {
+	if pgType != "TIMESTAMPTZ" {
+		return ""
+	}
+	args := splitTopLevelArgs(argList)
+	if len(args) < 2 {
+		return ""
+	}
+	timeValue := strings.ToUpper(strings.Trim(strings.TrimSpace(args[1]), `'"`))
+	if timeValue != "NOW" {
+		return ""
+	}
+	return "now()"
+}
+
+// splitTopLevelArgs splits a SQL function argument list on commas, ignoring commas that
+// appear inside single- or double-quoted string literals (e.g. a format string like
+// "'%Y,%m'" - not that strftime format strings use commas, but this keeps the split correct
+// for any literal argument).
+func splitTopLevelArgs(s string) []string {
+	var args []string
+	inQuote := byte(0)
+	start := 0
+	for i := 0; i < len(s); i++ {
+		switch {
+		case inQuote != 0:
+			if s[i] == inQuote {
+				inQuote = 0
+			}
+		case s[i] == '\'' || s[i] == '"':
+			inQuote = s[i]
+		case s[i] == ',':
+			args = append(args, s[start:i])
+			start = i + 1
+		}
+	}
+	args = append(args, s[start:])
+	return args
 }
 
 func sqliteFunctionArg(s, fn string) string {

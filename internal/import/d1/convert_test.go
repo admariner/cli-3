@@ -137,6 +137,57 @@ func TestMapSQLiteDefaultFunctionUnixEpoch(t *testing.T) {
 	}
 }
 
+// Bug: strftime('%Y-%m-%dT%H:%M:%SZ', 'now') (the common D1/Drizzle "current timestamp as
+// ISO-8601 text" idiom) was left unmapped and fell into the escaped-literal-string fallback.
+// That's harmless while the column stays TEXT, but once the column is inferred as TIMESTAMPTZ
+// (a timestamp-shaped name plus samples that look like timestamps), the same escaped literal
+// becomes an invalid `timestamp with time zone` value and Postgres rejects the CREATE TABLE.
+func TestMapSQLiteDefaultFunctionStrftimeNow(t *testing.T) {
+	cases := map[string]struct {
+		def    string
+		pgType string
+		want   string
+	}{
+		"strftime iso8601 'now' on TIMESTAMPTZ":       {"strftime('%Y-%m-%dT%H:%M:%SZ', 'now')", "TIMESTAMPTZ", "now()"},
+		"parenthesized strftime 'now' on TIMESTAMPTZ": {"(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))", "TIMESTAMPTZ", "now()"},
+		"STRFTIME uppercase 'now' on TIMESTAMPTZ":     {"STRFTIME('%Y-%m-%d', 'NOW')", "TIMESTAMPTZ", "now()"},
+		"strftime 'now' left unmapped on TEXT":        {"strftime('%Y-%m-%dT%H:%M:%SZ', 'now')", "TEXT", ""},
+		"strftime non-'now' value left unmapped":      {"strftime('%Y-%m-%d', modified_at)", "TIMESTAMPTZ", ""},
+	}
+	for name, tc := range cases {
+		got := mapSQLiteDefaultFunction(tc.def, tc.pgType)
+		if got != tc.want {
+			t.Fatalf("%s: mapSQLiteDefaultFunction(%q, %q) = %q, want %q", name, tc.def, tc.pgType, got, tc.want)
+		}
+	}
+}
+
+// TestConvertDefaultStrftimeNowOnInferredTimestamp reproduces the reported import failure:
+// ERROR: invalid input syntax for type timestamp with time zone:
+// "(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
+// A timestamp-named TEXT column whose sampled values look like timestamps gets promoted to
+// TIMESTAMPTZ; its strftime('now')-based DEFAULT must be mapped to now(), not quoted as a
+// literal string.
+func TestConvertDefaultStrftimeNowOnInferredTimestamp(t *testing.T) {
+	sql := `CREATE TABLE events (
+  id INTEGER PRIMARY KEY,
+  created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+INSERT INTO events (id, created_at) VALUES (1, '2024-01-01T00:00:00Z');
+`
+	ddl := convertTablesDDL(t, sql)
+	if !strings.Contains(ddl, `"created_at" TIMESTAMPTZ`) {
+		t.Fatalf("expected created_at to be inferred as TIMESTAMPTZ:\n%s", ddl)
+	}
+	if strings.Contains(ddl, `'(strftime(`) {
+		t.Fatalf("strftime('now') default was not mapped, still contains broken literal:\n%s", ddl)
+	}
+	if !strings.Contains(ddl, `DEFAULT now()`) {
+		t.Fatalf("expected strftime('now') default to be mapped to now():\n%s", ddl)
+	}
+	assertValidPostgresDDL(t, ddl)
+}
+
 // TestConvertDefaultDateExpressionNotQuotedAsString guards against regressing
 // to treating a SQLite expression default such as (date('now')) as a plain
 // string literal. Quoting the whole expression produces invalid Postgres DDL
