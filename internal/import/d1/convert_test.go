@@ -137,6 +137,46 @@ func TestMapSQLiteDefaultFunctionUnixEpoch(t *testing.T) {
 	}
 }
 
+// TestSplitTopLevelArgsHandlesDoubledSingleQuoteEscapes guards against the strftime-style
+// argument splitter closing a quoted argument on any single quote without treating a SQL
+// doubled-single-quote escape (two consecutive quote characters in a row) as staying inside the
+// string. If it did, a comma inside a properly escaped string argument would be misidentified
+// as an argument separator.
+func TestSplitTopLevelArgsHandlesDoubledSingleQuoteEscapes(t *testing.T) {
+	cases := map[string]struct {
+		in   string
+		want []string
+	}{
+		"comma inside a doubled-quote-escaped literal": {
+			`'%Y-%m-%d', 'it''s, now'`,
+			[]string{`'%Y-%m-%d'`, ` 'it''s, now'`},
+		},
+		"comma immediately after a doubled-quote escape": {
+			`'%Y-%m-%d', 'a'',b'`,
+			[]string{`'%Y-%m-%d'`, ` 'a'',b'`},
+		},
+		"multiple escaped quotes around commas in one literal": {
+			`'%Y-%m-%d', 'foo'',''bar'`,
+			[]string{`'%Y-%m-%d'`, ` 'foo'',''bar'`},
+		},
+		"plain top-level split unaffected": {
+			`'now', '+1 day'`,
+			[]string{`'now'`, ` '+1 day'`},
+		},
+	}
+	for name, tc := range cases {
+		got := splitTopLevelArgs(tc.in)
+		if len(got) != len(tc.want) {
+			t.Fatalf("%s: splitTopLevelArgs(%q) = %#v, want %#v", name, tc.in, got, tc.want)
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Fatalf("%s: splitTopLevelArgs(%q) = %#v, want %#v", name, tc.in, got, tc.want)
+			}
+		}
+	}
+}
+
 func TestMapSQLiteDefaultFunctionStrftimeNow(t *testing.T) {
 	utcDay := "date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
 	cases := map[string]struct {
@@ -175,13 +215,21 @@ func TestMapSQLiteDefaultFunctionStrftimeModifiers(t *testing.T) {
 			"strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-30 minutes')", "TIMESTAMPTZ",
 			"date_trunc('second', (now() - make_interval(secs => (30)::double precision * 60)))",
 		},
-		"'localtime' is not guessed": {
+		"'localtime' modifier is a no-op (TIMESTAMPTZ stores an absolute instant)": {
 			"strftime('%Y-%m-%dT%H:%M:%SZ', 'now', 'localtime')", "TIMESTAMPTZ",
-			"",
+			"date_trunc('second', now())",
 		},
-		"'utc' is not guessed": {
+		"'utc' modifier is a no-op (TIMESTAMPTZ stores an absolute instant)": {
 			"strftime('%Y-%m-%dT%H:%M:%SZ', 'now', 'utc')", "TIMESTAMPTZ",
-			"",
+			"date_trunc('second', now())",
+		},
+		"'UTC' modifier is case-insensitive": {
+			"strftime('%Y-%m-%dT%H:%M:%SZ', 'now', 'UTC')", "TIMESTAMPTZ",
+			"date_trunc('second', now())",
+		},
+		"'utc' combined with a real interval modifier still applies the interval": {
+			"strftime('%Y-%m-%dT%H:%M:%SZ', 'now', 'utc', '+1 day')", "TIMESTAMPTZ",
+			"date_trunc('second', (now() + make_interval(secs => (1)::double precision * 86400)))",
 		},
 		"'start of day' modifier": {
 			"strftime('%Y-%m-%dT%H:%M:%SZ', 'now', 'start of day')", "TIMESTAMPTZ",
@@ -288,6 +336,35 @@ INSERT INTO events (id, expires_at, starts_at) VALUES (1, '2024-01-02T00:00:00Z'
 	}
 	if strings.Contains(ddl, "strftime(") {
 		t.Fatalf("strftime() must not leak into Postgres DDL:\n%s", ddl)
+	}
+	assertValidPostgresDDL(t, ddl)
+}
+
+// TestConvertDefaultStrftimeUtcLocaltimeModifierIsNoOp guards against 'utc'/'localtime'
+// strftime modifiers aborting the whole DEFAULT mapping (and dropping the DEFAULT clause) on
+// an inferred TIMESTAMPTZ column. A TIMESTAMPTZ stores an absolute instant regardless of the
+// display-timezone modifier SQLite would otherwise apply when formatting the string, so both
+// modifiers should be treated as no-ops rather than making the default unmappable.
+func TestConvertDefaultStrftimeUtcLocaltimeModifierIsNoOp(t *testing.T) {
+	sql := `CREATE TABLE events (
+  id INTEGER PRIMARY KEY,
+  starts_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now', 'utc')),
+  ends_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now', 'localtime'))
+);
+INSERT INTO events (id, starts_at, ends_at) VALUES (1, '2024-01-01T00:00:00Z', '2024-01-02T00:00:00Z');
+`
+	ddl := convertTablesDDL(t, sql)
+	if !strings.Contains(ddl, `"starts_at" TIMESTAMPTZ`) || !strings.Contains(ddl, `"ends_at" TIMESTAMPTZ`) {
+		t.Fatalf("expected both columns to be inferred as TIMESTAMPTZ:\n%s", ddl)
+	}
+	if strings.Contains(ddl, "strftime(") {
+		t.Fatalf("strftime() must not leak into Postgres DDL:\n%s", ddl)
+	}
+	for _, col := range []string{"starts_at", "ends_at"} {
+		column := strings.Split(strings.Split(ddl, `"`+col+`" TIMESTAMPTZ`)[1], "\n")[0]
+		if !strings.Contains(column, "DEFAULT date_trunc('second', now())") {
+			t.Fatalf("expected 'utc'/'localtime' modifier to be a no-op, not drop the DEFAULT clause on %q:\n%s", col, ddl)
+		}
 	}
 	assertValidPostgresDDL(t, ddl)
 }

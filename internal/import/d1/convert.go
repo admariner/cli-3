@@ -571,6 +571,12 @@ func applyStrftimeModifiers(base string, modifiers []string) (expr string, ok bo
 	expr = base
 	for _, raw := range modifiers {
 		mod := strings.Trim(strings.TrimSpace(raw), `'"`)
+		if strings.EqualFold(mod, "utc") || strings.EqualFold(mod, "localtime") {
+			// Both are no-ops here: a TIMESTAMPTZ column stores an absolute instant
+			// regardless of the display-timezone modifier SQLite would otherwise apply
+			// when rendering the formatted string, so there's nothing to adjust.
+			continue
+		}
 		if m := strftimeStartOfModifierRe.FindStringSubmatch(mod); m != nil {
 			expr = utcDateTrunc(strings.ToLower(m[1]), expr)
 			continue

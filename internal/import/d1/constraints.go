@@ -276,6 +276,27 @@ func booleanCoercedColumnNames(table TableSchema, ctx *TypeCoercionContext) []st
 	return cols
 }
 
+// numericLiteralToken matches a full numeric literal - integer, decimal, or exponent form - so
+// that callers can tell a bare "0"/"1" apart from the leading digits of a longer literal like
+// "0.5" or "1e3". A plain \b boundary can't make that distinction: \b only asserts a
+// word/non-word transition, which still holds between a digit and a following ".", so a naive
+// `0\b` matches the "0" in "0.5" too.
+const numericLiteralToken = `[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?`
+
+// booleanLiteralSpelling maps a standalone "0"/"1" token to its boolean spelling, reporting
+// whether tok was in fact one of those exact tokens as opposed to a longer numeric literal that
+// merely starts with "0" or "1" (e.g. "0.0", "10", "1e3").
+func booleanLiteralSpelling(tok string) (string, bool) {
+	switch tok {
+	case "0":
+		return "false", true
+	case "1":
+		return "true", true
+	default:
+		return tok, false
+	}
+}
+
 // rewriteBooleanCheckLiterals runs only after column names have been normalized and quoted.
 func rewriteBooleanCheckLiterals(expr string, boolCols []string) string {
 	idents := make([]string, len(boolCols))
@@ -283,41 +304,80 @@ func rewriteBooleanCheckLiterals(expr string, boolCols []string) string {
 		idents[i] = regexp.QuoteMeta(postgres.QuoteIdentifier(col))
 	}
 	ident := `(?:` + strings.Join(idents, `|`) + `)`
-	literals := []struct{ from, to string }{{"0", "false"}, {"1", "true"}}
-	left := make([]*regexp.Regexp, len(literals))
-	right := make([]*regexp.Regexp, len(literals))
-	isLeft := make([]*regexp.Regexp, len(literals))
-	isRight := make([]*regexp.Regexp, len(literals))
-	equalLeft := make([]*regexp.Regexp, len(literals))
-	equalRight := make([]*regexp.Regexp, len(literals))
-	for i, literal := range literals {
-		left[i] = regexp.MustCompile(`(` + ident + `\s*(?:=|<>|!=|<=|>=|<|>)\s*)` + literal.from + `\b`)
-		right[i] = regexp.MustCompile(`\b` + literal.from + `(\s*(?:=|<>|!=|<=|>=|<|>)\s*` + ident + `)`)
-		isLeft[i] = regexp.MustCompile(`(` + ident + `\s+(?i:IS(?:\s+NOT)?(?:\s+DISTINCT\s+FROM)?)\s*)` + literal.from + `\b`)
-		isRight[i] = regexp.MustCompile(`\b` + literal.from + `\s+(?i:(IS(?:\s+NOT)?(?:\s+DISTINCT\s+FROM)?))\s*(` + ident + `)`)
-		equalLeft[i] = regexp.MustCompile(`(` + ident + `\s*)==(\s*)` + literal.from + `\b`)
-		equalRight[i] = regexp.MustCompile(`\b` + literal.from + `(\s*)==(\s*` + ident + `)`)
-	}
-	in := regexp.MustCompile(`(` + ident + `\s+(?i:(?:NOT\s+)?IN)\s*\()(\s*[01](?:\s*,\s*[01])*\s*)(\))`)
-	between := regexp.MustCompile(`(` + ident + `\s+(?i:(?:NOT\s+)?BETWEEN)\s+)([01])(\s+(?i:AND)\s+)([01])\b`)
-	replaceList := strings.NewReplacer("0", "false", "1", "true")
+	num := numericLiteralToken
+
+	left := regexp.MustCompile(`(` + ident + `\s*(?:=|<>|!=|<=|>=|<|>)\s*)(` + num + `)`)
+	right := regexp.MustCompile(`(` + num + `)(\s*(?:=|<>|!=|<=|>=|<|>)\s*` + ident + `)`)
+	isLeft := regexp.MustCompile(`(` + ident + `\s+(?i:IS(?:\s+NOT)?(?:\s+DISTINCT\s+FROM)?)\s*)(` + num + `)`)
+	isRight := regexp.MustCompile(`(` + num + `)\s+(?i:(IS(?:\s+NOT)?(?:\s+DISTINCT\s+FROM)?))\s*(` + ident + `)`)
+	equalLeft := regexp.MustCompile(`(` + ident + `\s*)==(\s*)(` + num + `)`)
+	equalRight := regexp.MustCompile(`(` + num + `)(\s*)==(\s*` + ident + `)`)
+	in := regexp.MustCompile(`(` + ident + `\s+(?i:(?:NOT\s+)?IN)\s*\()(\s*` + num + `(?:\s*,\s*` + num + `)*\s*)(\))`)
+	between := regexp.MustCompile(`(` + ident + `\s+(?i:(?:NOT\s+)?BETWEEN)\s+)(` + num + `)(\s+(?i:AND)\s+)(` + num + `)`)
+	numRe := regexp.MustCompile(num)
 
 	return rewriteOutsideStringLiterals(expr, func(sql string) string {
-		for i, literal := range literals {
-			sql = left[i].ReplaceAllString(sql, `${1}`+literal.to)
-			sql = right[i].ReplaceAllString(sql, literal.to+`${1}`)
-			sql = isLeft[i].ReplaceAllString(sql, `${1}`+literal.to)
-			sql = isRight[i].ReplaceAllString(sql, `${2} ${1} `+literal.to)
-			sql = equalLeft[i].ReplaceAllString(sql, `${1}=${2}`+literal.to)
-			sql = equalRight[i].ReplaceAllString(sql, literal.to+`${1}=${2}`)
-		}
+		sql = left.ReplaceAllStringFunc(sql, func(m string) string {
+			parts := left.FindStringSubmatch(m)
+			lit, ok := booleanLiteralSpelling(parts[2])
+			if !ok {
+				return m
+			}
+			return parts[1] + lit
+		})
+		sql = right.ReplaceAllStringFunc(sql, func(m string) string {
+			parts := right.FindStringSubmatch(m)
+			lit, ok := booleanLiteralSpelling(parts[1])
+			if !ok {
+				return m
+			}
+			return lit + parts[2]
+		})
+		sql = isLeft.ReplaceAllStringFunc(sql, func(m string) string {
+			parts := isLeft.FindStringSubmatch(m)
+			lit, ok := booleanLiteralSpelling(parts[2])
+			if !ok {
+				return m
+			}
+			return parts[1] + lit
+		})
+		sql = isRight.ReplaceAllStringFunc(sql, func(m string) string {
+			parts := isRight.FindStringSubmatch(m)
+			lit, ok := booleanLiteralSpelling(parts[1])
+			if !ok {
+				return m
+			}
+			return parts[3] + " " + parts[2] + " " + lit
+		})
+		sql = equalLeft.ReplaceAllStringFunc(sql, func(m string) string {
+			parts := equalLeft.FindStringSubmatch(m)
+			lit, ok := booleanLiteralSpelling(parts[3])
+			if !ok {
+				return m
+			}
+			return parts[1] + "=" + parts[2] + lit
+		})
+		sql = equalRight.ReplaceAllStringFunc(sql, func(m string) string {
+			parts := equalRight.FindStringSubmatch(m)
+			lit, ok := booleanLiteralSpelling(parts[1])
+			if !ok {
+				return m
+			}
+			return lit + parts[2] + "=" + parts[3]
+		})
 		sql = in.ReplaceAllStringFunc(sql, func(match string) string {
 			parts := in.FindStringSubmatch(match)
-			return parts[1] + replaceList.Replace(parts[2]) + parts[3]
+			content := numRe.ReplaceAllStringFunc(parts[2], func(tok string) string {
+				lit, _ := booleanLiteralSpelling(tok)
+				return lit
+			})
+			return parts[1] + content + parts[3]
 		})
 		return between.ReplaceAllStringFunc(sql, func(match string) string {
 			parts := between.FindStringSubmatch(match)
-			return parts[1] + replaceList.Replace(parts[2]) + parts[3] + replaceList.Replace(parts[4])
+			firstLit, _ := booleanLiteralSpelling(parts[2])
+			secondLit, _ := booleanLiteralSpelling(parts[4])
+			return parts[1] + firstLit + parts[3] + secondLit
 		})
 	})
 }
