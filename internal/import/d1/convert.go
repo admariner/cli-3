@@ -546,8 +546,7 @@ var strftimeIntervalModifierRe = regexp.MustCompile(`(?i)^([+-]?\d+(?:\.\d+)?)\s
 
 var strftimeStartOfModifierRe = regexp.MustCompile(`(?i)^start of (day|month|year)$`)
 
-// strftimeTimeValueExpr maps the SQLite values that mean "now" without guessing about
-// arbitrary date strings or column references.
+// strftimeTimeValueExpr maps SQLite's current-time values to Postgres.
 func strftimeTimeValueExpr(arg string) (string, bool) {
 	trimmed := strings.TrimSpace(arg)
 	if strings.HasPrefix(trimmed, "'") || strings.HasPrefix(trimmed, `"`) {
@@ -572,9 +571,6 @@ func applyStrftimeModifiers(base string, modifiers []string) (expr string, ok bo
 	for _, raw := range modifiers {
 		mod := strings.Trim(strings.TrimSpace(raw), `'"`)
 		if strings.EqualFold(mod, "utc") || strings.EqualFold(mod, "localtime") {
-			// Both are no-ops here: a TIMESTAMPTZ column stores an absolute instant
-			// regardless of the display-timezone modifier SQLite would otherwise apply
-			// when rendering the formatted string, so there's nothing to adjust.
 			continue
 		}
 		if m := strftimeStartOfModifierRe.FindStringSubmatch(mod); m != nil {

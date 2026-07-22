@@ -137,11 +137,6 @@ func TestMapSQLiteDefaultFunctionUnixEpoch(t *testing.T) {
 	}
 }
 
-// TestSplitTopLevelArgsHandlesDoubledSingleQuoteEscapes guards against the strftime-style
-// argument splitter closing a quoted argument on any single quote without treating a SQL
-// doubled-single-quote escape (two consecutive quote characters in a row) as staying inside the
-// string. If it did, a comma inside a properly escaped string argument would be misidentified
-// as an argument separator.
 func TestSplitTopLevelArgsHandlesDoubledSingleQuoteEscapes(t *testing.T) {
 	cases := map[string]struct {
 		in   string
@@ -215,11 +210,11 @@ func TestMapSQLiteDefaultFunctionStrftimeModifiers(t *testing.T) {
 			"strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-30 minutes')", "TIMESTAMPTZ",
 			"date_trunc('second', (now() - make_interval(secs => (30)::double precision * 60)))",
 		},
-		"'localtime' modifier is a no-op (TIMESTAMPTZ stores an absolute instant)": {
+		"'localtime' modifier is a no-op": {
 			"strftime('%Y-%m-%dT%H:%M:%SZ', 'now', 'localtime')", "TIMESTAMPTZ",
 			"date_trunc('second', now())",
 		},
-		"'utc' modifier is a no-op (TIMESTAMPTZ stores an absolute instant)": {
+		"'utc' modifier is a no-op": {
 			"strftime('%Y-%m-%dT%H:%M:%SZ', 'now', 'utc')", "TIMESTAMPTZ",
 			"date_trunc('second', now())",
 		},
@@ -340,11 +335,6 @@ INSERT INTO events (id, expires_at, starts_at) VALUES (1, '2024-01-02T00:00:00Z'
 	assertValidPostgresDDL(t, ddl)
 }
 
-// TestConvertDefaultStrftimeUtcLocaltimeModifierIsNoOp guards against 'utc'/'localtime'
-// strftime modifiers aborting the whole DEFAULT mapping (and dropping the DEFAULT clause) on
-// an inferred TIMESTAMPTZ column. A TIMESTAMPTZ stores an absolute instant regardless of the
-// display-timezone modifier SQLite would otherwise apply when formatting the string, so both
-// modifiers should be treated as no-ops rather than making the default unmappable.
 func TestConvertDefaultStrftimeUtcLocaltimeModifierIsNoOp(t *testing.T) {
 	sql := `CREATE TABLE events (
   id INTEGER PRIMARY KEY,

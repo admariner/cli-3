@@ -266,12 +266,6 @@ func TestConvertCheckExprBooleanLiteralRewrite(t *testing.T) {
 	}
 }
 
-// TestConvertCheckExprBooleanLiteralRewritePreservesDecimals guards against the boolean CHECK
-// literal rewrite mangling decimal literals that merely start with "0" or "1". Before the fix,
-// the rewrite regexes used \b immediately after the "0"/"1" token, but \b only asserts a
-// word/non-word transition - which still holds between a digit and a following "." - so
-// `"is_active" = 0.0` and `BETWEEN 0 AND 1.0` had only their integer prefix rewritten, producing
-// invalid Postgres like `"is_active" = false.0`.
 func TestConvertCheckExprBooleanLiteralRewritePreservesDecimals(t *testing.T) {
 	table := TableSchema{Name: "t", Columns: []ColumnSchema{
 		{Name: "is_active", Type: "INTEGER"},
@@ -282,11 +276,17 @@ func TestConvertCheckExprBooleanLiteralRewritePreservesDecimals(t *testing.T) {
 		"is_active = 0.0":             `"is_active" = 0.0`,
 		"is_active = 1.0":             `"is_active" = 1.0`,
 		"0.0 = is_active":             `0.0 = "is_active"`,
-		"is_active BETWEEN 0 AND 1.0": `"is_active" BETWEEN false AND 1.0`,
-		"is_active BETWEEN 0.0 AND 1": `"is_active" BETWEEN 0.0 AND true`,
-		"is_active IN (0, 1.5)":       `"is_active" IN (false, 1.5)`,
+		"is_active BETWEEN 0 AND 1.0": `"is_active" BETWEEN 0 AND 1.0`,
+		"is_active BETWEEN 0.0 AND 1": `"is_active" BETWEEN 0.0 AND 1`,
+		"is_active IN (0, 1.5)":       `"is_active" IN (0, 1.5)`,
 		"is_active = 10":              `"is_active" = 10`,
 		"is_active = 1e0":             `"is_active" = 1e0`,
+		"is_active = 1.":              `"is_active" = 1.`,
+		"is_active = 1.e0":            `"is_active" = 1.e0`,
+		"is_active = 0x1":             `"is_active" = 0x1`,
+		"is_active = 1_0":             `"is_active" = 1_0`,
+		"is_active = 1 + 0":           `"is_active" = 1 + 0`,
+		"- 1 = is_active":             `- 1 = "is_active"`,
 	}
 	for expr, want := range cases {
 		if got := convertCheckExpr(expr, table, ctx); got != want {
