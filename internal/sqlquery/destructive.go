@@ -150,6 +150,7 @@ func stripSQLGuardIgnoredText(stmt string) string {
 	quote := byte(0)
 	lineComment := false
 	blockComment := false
+	execComment := false
 	for i := 0; i < len(stmt); i++ {
 		c := stmt[i]
 		if lineComment {
@@ -187,6 +188,15 @@ func stripSQLGuardIgnoredText(stmt string) string {
 			}
 			continue
 		}
+		// MySQL executable comments /*! ... */ and /*!NNNNN ... */ are live SQL.
+		// Blank the delimiters (and optional version digits) but keep the body.
+		if execComment && c == '*' && i+1 < len(stmt) && stmt[i+1] == '/' {
+			out.WriteByte(' ')
+			i++
+			out.WriteByte(' ')
+			execComment = false
+			continue
+		}
 		switch c {
 		case '#':
 			lineComment = true
@@ -202,10 +212,22 @@ func stripSQLGuardIgnoredText(stmt string) string {
 			}
 		case '/':
 			if i+1 < len(stmt) && stmt[i+1] == '*' {
-				blockComment = true
-				out.WriteByte(' ')
-				i++
-				out.WriteByte(' ')
+				if i+2 < len(stmt) && stmt[i+2] == '!' {
+					out.WriteByte(' ')
+					out.WriteByte(' ')
+					out.WriteByte(' ')
+					i += 2
+					for i+1 < len(stmt) && stmt[i+1] >= '0' && stmt[i+1] <= '9' {
+						i++
+						out.WriteByte(' ')
+					}
+					execComment = true
+				} else {
+					blockComment = true
+					out.WriteByte(' ')
+					i++
+					out.WriteByte(' ')
+				}
 			} else {
 				out.WriteByte(c)
 			}
