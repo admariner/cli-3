@@ -2,6 +2,7 @@ package d1
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/planetscale/cli/internal/postgres"
@@ -48,7 +49,7 @@ func referencesClause(colDef string) string {
 	return strings.TrimSpace(colDef[idx:])
 }
 
-func convertTableConstraint(clause string, table TableSchema, all []TableSchema) string {
+func convertTableConstraint(clause string, table TableSchema, all []TableSchema, ctx *TypeCoercionContext) string {
 	clause = strings.TrimSpace(clause)
 	clause = strings.TrimSuffix(clause, ",")
 	if clause == "" {
@@ -58,7 +59,7 @@ func convertTableConstraint(clause string, table TableSchema, all []TableSchema)
 	upper := strings.ToUpper(clause)
 	switch {
 	case strings.HasPrefix(upper, "CONSTRAINT "):
-		return convertNamedConstraint(clause, table, all)
+		return convertNamedConstraint(clause, table, all, ctx)
 	case strings.HasPrefix(upper, "FOREIGN KEY"):
 		return convertForeignKeyConstraint(clause, table, all)
 	case strings.HasPrefix(upper, "PRIMARY KEY"):
@@ -66,7 +67,7 @@ func convertTableConstraint(clause string, table TableSchema, all []TableSchema)
 	case strings.HasPrefix(upper, "UNIQUE"):
 		return convertUniqueConstraint(clause, table)
 	case strings.HasPrefix(upper, "CHECK"):
-		return convertCheckConstraint(clause, table)
+		return convertCheckConstraint(clause, table, ctx)
 	default:
 		return clause
 	}
@@ -75,13 +76,13 @@ func convertTableConstraint(clause string, table TableSchema, all []TableSchema)
 // convertNamedConstraint converts a `CONSTRAINT <name> <body>` clause by re-quoting the
 // constraint name and running the body through the same conversion as unnamed constraints,
 // so named constraints get identical quoting/canonicalization fixes.
-func convertNamedConstraint(clause string, table TableSchema, all []TableSchema) string {
+func convertNamedConstraint(clause string, table TableSchema, all []TableSchema, ctx *TypeCoercionContext) string {
 	rest := strings.TrimSpace(clause[len("CONSTRAINT"):])
 	name, body := parseColumnNameAndRest(rest)
 	if name == "" || body == "" {
 		return clause
 	}
-	converted := convertTableConstraint(body, table, all)
+	converted := convertTableConstraint(body, table, all, ctx)
 	if converted == "" {
 		return clause
 	}
@@ -92,7 +93,7 @@ func convertNamedConstraint(clause string, table TableSchema, all []TableSchema)
 // identifiers inside expr that reference the table's columns (so mixed-case column names
 // survive Postgres's case-folding of unquoted identifiers) and converting SQLite's
 // double-quoted string-literal fallback into proper single-quoted literals.
-func convertCheckConstraint(clause string, table TableSchema) string {
+func convertCheckConstraint(clause string, table TableSchema, ctx *TypeCoercionContext) string {
 	clause = strings.TrimSpace(clause)
 	clause = strings.TrimSuffix(clause, ",")
 
@@ -109,7 +110,7 @@ func convertCheckConstraint(clause string, table TableSchema) string {
 		return clause
 	}
 	expr := rest[1:end]
-	return "CHECK (" + convertCheckExpr(expr, table) + ")"
+	return "CHECK (" + convertCheckExpr(expr, table, ctx) + ")"
 }
 
 // checkExprKeywords are SQL keywords that can legitimately appear as bare words inside a
@@ -141,7 +142,8 @@ var checkExprKeywords = map[string]struct{}{
 //     that Postgres rejects — are converted to double-quoted identifiers, canonicalized
 //     to the column's declared case when they match one.
 //   - single-quoted string literals and everything else are passed through unchanged.
-func convertCheckExpr(expr string, table TableSchema) string {
+//   - 0/1 values compared with coerced BOOLEAN columns become false/true.
+func convertCheckExpr(expr string, table TableSchema, ctx *TypeCoercionContext) string {
 	colMap := make(map[string]string, len(table.Columns))
 	for _, col := range table.Columns {
 		colMap[strings.ToLower(col.Name)] = col.Name
@@ -241,7 +243,11 @@ func convertCheckExpr(expr string, table TableSchema) string {
 			i++
 		}
 	}
-	return out.String()
+	result := out.String()
+	if boolCols := booleanCoercedColumnNames(table, ctx); len(boolCols) > 0 {
+		result = rewriteBooleanCheckLiterals(result, boolCols)
+	}
+	return result
 }
 
 func isIdentStartByte(c byte) bool {
@@ -255,6 +261,109 @@ func canonicalIdent(ident string, colMap map[string]string) string {
 		return actual
 	}
 	return ident
+}
+
+func booleanCoercedColumnNames(table TableSchema, ctx *TypeCoercionContext) []string {
+	if ctx == nil {
+		return nil
+	}
+	var cols []string
+	for _, col := range table.Columns {
+		if isBooleanLikeColumn(col, table, ctx) {
+			cols = append(cols, col.Name)
+		}
+	}
+	return cols
+}
+
+// rewriteBooleanCheckLiterals runs only after column names have been normalized and quoted.
+func rewriteBooleanCheckLiterals(expr string, boolCols []string) string {
+	idents := make([]string, len(boolCols))
+	for i, col := range boolCols {
+		idents[i] = regexp.QuoteMeta(postgres.QuoteIdentifier(col))
+	}
+	ident := `(?:` + strings.Join(idents, `|`) + `)`
+	operandStart := `(^|[(,]\s*|(?i:\b(?:AND|OR)\b)\s*)`
+	operandEnd := `(\s*(?:(?i:AND|OR)\b|[),]|$))`
+	literals := []struct{ from, to string }{{"0", "false"}, {"1", "true"}}
+	left := make([]*regexp.Regexp, len(literals))
+	right := make([]*regexp.Regexp, len(literals))
+	isLeft := make([]*regexp.Regexp, len(literals))
+	isRight := make([]*regexp.Regexp, len(literals))
+	equalLeft := make([]*regexp.Regexp, len(literals))
+	equalRight := make([]*regexp.Regexp, len(literals))
+	for i, literal := range literals {
+		left[i] = regexp.MustCompile(`(` + ident + `\s*(?:=|<>|!=|<=|>=|<|>)\s*)` + literal.from + operandEnd)
+		right[i] = regexp.MustCompile(operandStart + literal.from + `(\s*(?:=|<>|!=|<=|>=|<|>)\s*` + ident + `)`)
+		isLeft[i] = regexp.MustCompile(`(` + ident + `\s+(?i:IS(?:\s+NOT)?(?:\s+DISTINCT\s+FROM)?)\s*)` + literal.from + operandEnd)
+		isRight[i] = regexp.MustCompile(operandStart + literal.from + `\s+(?i:(IS(?:\s+NOT)?(?:\s+DISTINCT\s+FROM)?))\s*(` + ident + `)`)
+		equalLeft[i] = regexp.MustCompile(`(` + ident + `\s*)==(\s*)` + literal.from + operandEnd)
+		equalRight[i] = regexp.MustCompile(operandStart + literal.from + `(\s*)==(\s*` + ident + `)`)
+	}
+	in := regexp.MustCompile(`(` + ident + `\s+(?i:(?:NOT\s+)?IN)\s*\()(\s*[01](?:\s*,\s*[01])*\s*)(\))`)
+	between := regexp.MustCompile(`(` + ident + `\s+(?i:(?:NOT\s+)?BETWEEN)\s+)([01])(\s+(?i:AND)\s+)([01])` + operandEnd)
+	replaceList := strings.NewReplacer("0", "false", "1", "true")
+
+	return rewriteOutsideStringLiterals(expr, func(sql string) string {
+		for i, literal := range literals {
+			sql = left[i].ReplaceAllString(sql, `${1}`+literal.to+`${2}`)
+			sql = right[i].ReplaceAllString(sql, `${1}`+literal.to+`${2}`)
+			sql = isLeft[i].ReplaceAllString(sql, `${1}`+literal.to+`${2}`)
+			sql = isRight[i].ReplaceAllString(sql, `${1}${3} ${2} `+literal.to)
+			sql = equalLeft[i].ReplaceAllString(sql, `${1}=${2}`+literal.to+`${3}`)
+			sql = equalRight[i].ReplaceAllString(sql, `${1}`+literal.to+`${2}=${3}`)
+		}
+		sql = in.ReplaceAllStringFunc(sql, func(match string) string {
+			parts := in.FindStringSubmatch(match)
+			return parts[1] + replaceList.Replace(parts[2]) + parts[3]
+		})
+		return between.ReplaceAllStringFunc(sql, func(match string) string {
+			parts := between.FindStringSubmatch(match)
+			return parts[1] + replaceList.Replace(parts[2]) + parts[3] + replaceList.Replace(parts[4]) + parts[5]
+		})
+	})
+}
+
+// rewriteOutsideStringLiterals leaves quoted text alone while rewriting SQL around it.
+func rewriteOutsideStringLiterals(expr string, rewrite func(string) string) string {
+	var out strings.Builder
+	for len(expr) > 0 {
+		start, end := nextStringLiteral(expr)
+		if start < 0 {
+			out.WriteString(rewrite(expr))
+			break
+		}
+		out.WriteString(rewrite(expr[:start]))
+		out.WriteString(expr[start:end])
+		expr = expr[end:]
+	}
+	return out.String()
+}
+
+func nextStringLiteral(expr string) (int, int) {
+	for i := 0; i < len(expr); i++ {
+		switch expr[i] {
+		case '"':
+			i = quotedEnd(expr, i, '"') - 1
+		case '\'':
+			return i, quotedEnd(expr, i, '\'')
+		}
+	}
+	return -1, -1
+}
+
+func quotedEnd(s string, start int, quote byte) int {
+	for i := start + 1; i < len(s); i++ {
+		if s[i] != quote {
+			continue
+		}
+		if i+1 < len(s) && s[i+1] == quote {
+			i++
+			continue
+		}
+		return i + 1
+	}
+	return len(s)
 }
 
 func convertForeignKeyConstraint(clause string, table TableSchema, all []TableSchema) string {
@@ -494,10 +603,8 @@ func columnFKTarget(col ColumnSchema, table TableSchema) (string, string) {
 	}
 	for _, constraint := range table.Constraints {
 		cols, refs := parseTableLevelForeignKey(constraint)
-		for _, name := range cols {
-			if name == col.Name {
-				return parseReferencesTarget(refs)
-			}
+		if slices.Contains(cols, col.Name) {
+			return parseReferencesTarget(refs)
 		}
 	}
 	return "", ""

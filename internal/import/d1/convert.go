@@ -114,7 +114,7 @@ func convertTableDDL(table TableSchema, all []TableSchema, ctx *TypeCoercionCont
 		lines = append(lines, "  "+convertColumn(col, table, all, ctx))
 	}
 	for _, constraint := range table.Constraints {
-		if converted := convertTableConstraint(constraint, table, all); converted != "" {
+		if converted := convertTableConstraint(constraint, table, all, ctx); converted != "" {
 			lines = append(lines, "  "+converted)
 		}
 	}
@@ -135,7 +135,7 @@ func convertColumn(col ColumnSchema, table TableSchema, all []TableSchema, ctx *
 	// (pre-18), so VIRTUAL columns are materialized as STORED as the closest
 	// equivalent rather than silently dropping the computation.
 	if col.GeneratedExpr != "" {
-		parts = append(parts, "GENERATED ALWAYS AS ("+convertCheckExpr(col.GeneratedExpr, table)+") STORED")
+		parts = append(parts, "GENERATED ALWAYS AS ("+convertCheckExpr(col.GeneratedExpr, table, ctx)+") STORED")
 	}
 
 	if col.AutoIncrement {
@@ -156,11 +156,13 @@ func convertColumn(col ColumnSchema, table TableSchema, all []TableSchema, ctx *
 	}
 
 	if col.DefaultValue != "" && !col.AutoIncrement && col.GeneratedExpr == "" {
-		parts = append(parts, "DEFAULT", convertDefault(col.DefaultValue, pgType))
+		if def, ok := convertDefault(col.DefaultValue, pgType); ok {
+			parts = append(parts, "DEFAULT", def)
+		}
 	}
 
 	for _, check := range col.CheckExprs {
-		parts = append(parts, "CHECK ("+convertCheckExpr(check, table)+")")
+		parts = append(parts, "CHECK ("+convertCheckExpr(check, table, ctx)+")")
 	}
 
 	if col.ForeignKey != "" {
@@ -228,39 +230,50 @@ func numericPostgresType(t string) string {
 	return "NUMERIC" + t[idx:idx+end+1]
 }
 
-func convertDefault(def, pgType string) string {
+func convertDefault(def, pgType string) (string, bool) {
 	def = strings.TrimSpace(def)
 	upper := strings.ToUpper(def)
 	if upper == "NULL" {
-		return "NULL"
+		return "NULL", true
+	}
+	quotedLiteral := strings.HasPrefix(def, "'") || strings.HasPrefix(def, `"`)
+	if args, ok := bareSQLiteFunctionArgs(def, "STRFTIME"); ok {
+		if mapped := mapStrftimeNowDefault(args, pgType); mapped != "" {
+			return mapped, true
+		}
+		if pgType != "TEXT" {
+			return "", false
+		}
+	} else if !quotedLiteral && strings.Contains(upper, "STRFTIME(") && pgType != "TEXT" {
+		return "", false
 	}
 	if mapped := mapSQLiteDefaultFunction(def, pgType); mapped != "" {
-		return mapped
+		return mapped, true
 	}
 	if mapped := mapSQLiteCastDefault(def, pgType); mapped != "" {
-		return mapped
+		return mapped, true
 	}
 	if pgType == "BOOLEAN" {
 		if lit := parseBooleanDefaultLiteral(def); lit != "" {
-			return lit
+			return lit, true
 		}
 	}
 	if pgType == "UUID" {
-		return "'" + strings.Trim(def, "'\"") + "'"
+		return "'" + strings.Trim(def, "'\"") + "'", true
 	}
 	if strings.HasPrefix(def, "'") {
 		// Already a valid (SQLite and Postgres share '' escaping) single-quoted literal.
-		return def
+		return def, true
 	}
 	if strings.HasPrefix(def, `"`) {
 		// SQLite's double-quoted string-literal fallback: Postgres always treats double
 		// quotes as identifiers, so re-quote as a proper single-quoted string literal.
-		return quotePostgresLiteral(unwrapDoubleQuotedLiteral(def))
+		return quotePostgresLiteral(unwrapDoubleQuotedLiteral(def)), true
 	}
 	if pgType == "TEXT" || pgType == "TIMESTAMPTZ" {
-		return quotePostgresLiteral(strings.Trim(def, "'\""))
+		return quotePostgresLiteral(strings.Trim(def, "'\"")), true
 	}
-	return def
+	return def, true
 }
 
 // quotePostgresLiteral wraps s as a Postgres single-quoted string literal, doubling any
@@ -387,6 +400,11 @@ func mapSQLiteDefaultFunction(def, pgType string) string {
 	}
 	if arg := sqliteFunctionArg(trimmed, "UNIXEPOCH"); arg != "" || strings.HasSuffix(upper, "UNIXEPOCH()") {
 		if mapped := mapUnixEpochDefault(arg, pgType); mapped != "" {
+			return mapped
+		}
+	}
+	if arg, ok := bareSQLiteFunctionArgs(trimmed, "STRFTIME"); ok {
+		if mapped := mapStrftimeNowDefault(arg, pgType); mapped != "" {
 			return mapped
 		}
 	}
@@ -522,6 +540,147 @@ func unixEpochArgLooksNumeric(arg string) bool {
 		return true
 	}
 	return !strings.HasPrefix(arg, "'") && !strings.HasPrefix(arg, `"`)
+}
+
+var strftimeIntervalModifierRe = regexp.MustCompile(`(?i)^([+-]?\d+(?:\.\d+)?)\s+(days?|hours?|minutes?|seconds?)$`)
+
+var strftimeStartOfModifierRe = regexp.MustCompile(`(?i)^start of (day|month|year)$`)
+
+// strftimeTimeValueExpr maps SQLite's current-time values to Postgres.
+func strftimeTimeValueExpr(arg string) (string, bool) {
+	trimmed := strings.TrimSpace(arg)
+	if strings.HasPrefix(trimmed, "'") || strings.HasPrefix(trimmed, `"`) {
+		if strings.ToUpper(strings.Trim(trimmed, `'"`)) == "NOW" {
+			return "now()", true
+		}
+		return "", false
+	}
+	switch strings.ToUpper(trimmed) {
+	case "CURRENT_TIMESTAMP":
+		return "now()", true
+	case "CURRENT_TIME":
+		return "(TIMESTAMPTZ '2000-01-01 00:00:00+00' + ((now() AT TIME ZONE 'UTC') - date_trunc('day', now() AT TIME ZONE 'UTC')))", true
+	case "CURRENT_DATE":
+		return utcDateTrunc("day", "now()"), true
+	}
+	return "", false
+}
+
+func applyStrftimeModifiers(base string, modifiers []string) (expr string, ok bool) {
+	expr = base
+	for _, raw := range modifiers {
+		mod := strings.Trim(strings.TrimSpace(raw), `'"`)
+		if strings.EqualFold(mod, "utc") || strings.EqualFold(mod, "localtime") {
+			continue
+		}
+		if m := strftimeStartOfModifierRe.FindStringSubmatch(mod); m != nil {
+			expr = utcDateTrunc(strings.ToLower(m[1]), expr)
+			continue
+		}
+		m := strftimeIntervalModifierRe.FindStringSubmatch(mod)
+		if m == nil {
+			return "", false
+		}
+		qty, unit := m[1], strings.ToLower(m[2])
+		sign := "+"
+		if strings.HasPrefix(qty, "-") {
+			sign, qty = "-", qty[1:]
+		} else {
+			qty = strings.TrimPrefix(qty, "+")
+		}
+		seconds := map[string]int{"second": 1, "seconds": 1, "minute": 60, "minutes": 60, "hour": 3600, "hours": 3600, "day": 86400, "days": 86400}[unit]
+		duration := "make_interval(secs => (" + qty + ")::double precision * " + strconv.Itoa(seconds) + ")"
+		expr = "(" + expr + " " + sign + " " + duration + ")"
+	}
+	return expr, true
+}
+
+func mapStrftimeNowDefault(argList, pgType string) string {
+	args := splitTopLevelArgs(argList)
+	if len(args) < 2 {
+		return ""
+	}
+	timeExpr, ok := strftimeTimeValueExpr(args[1])
+	if !ok {
+		return ""
+	}
+	timeExpr, ok = applyStrftimeModifiers(timeExpr, args[2:])
+	if !ok {
+		return ""
+	}
+	format := strings.Trim(strings.TrimSpace(args[0]), `'"`)
+
+	switch pgType {
+	case "TIMESTAMPTZ":
+		return mapStrftimeTimestampFormat(format, timeExpr)
+	case "BIGINT", "INTEGER", "DOUBLE PRECISION":
+		if format != "%s" {
+			return ""
+		}
+		epoch := "floor(extract(epoch from " + timeExpr + "))"
+		switch pgType {
+		case "BIGINT":
+			return epoch + "::bigint"
+		case "INTEGER":
+			return epoch + "::integer"
+		default:
+			return epoch + "::double precision"
+		}
+	default:
+		return ""
+	}
+}
+
+func mapStrftimeTimestampFormat(format, expr string) string {
+	switch format {
+	case "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%FT%TZ", "%FT%T", "%F %T":
+		return "date_trunc('second', " + expr + ")"
+	case "%Y-%m-%dT%H:%M:%fZ", "%Y-%m-%dT%H:%M:%f", "%Y-%m-%d %H:%M:%f", "%FT%H:%M:%fZ":
+		return "date_trunc('milliseconds', " + expr + ")"
+	case "%Y-%m-%d", "%F":
+		return utcDateTrunc("day", expr)
+	default:
+		return ""
+	}
+}
+
+func utcDateTrunc(unit, expr string) string {
+	return "date_trunc('" + unit + "', " + expr + " AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
+}
+
+// splitTopLevelArgs splits commas outside quoted strings.
+func splitTopLevelArgs(s string) []string {
+	var args []string
+	inQuote := byte(0)
+	start := 0
+	for i := 0; i < len(s); i++ {
+		switch {
+		case inQuote != 0:
+			if s[i] == inQuote {
+				inQuote = 0
+			}
+		case s[i] == '\'' || s[i] == '"':
+			inQuote = s[i]
+		case s[i] == ',':
+			args = append(args, s[start:i])
+			start = i + 1
+		}
+	}
+	args = append(args, s[start:])
+	return args
+}
+
+func bareSQLiteFunctionArgs(s, name string) (string, bool) {
+	s = unwrapOuterParens(s)
+	open := len(name)
+	if len(s) <= open || !strings.EqualFold(s[:open], name) || s[open] != '(' {
+		return "", false
+	}
+	end, ok := matchingParenEnd(s, open)
+	if !ok || end != len(s)-1 {
+		return "", false
+	}
+	return strings.TrimSpace(s[open+1 : end]), true
 }
 
 func sqliteFunctionArg(s, fn string) string {

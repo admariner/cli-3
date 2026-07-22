@@ -219,7 +219,7 @@ func TestStateStore(t *testing.T) {
 }
 
 func TestConvertTableConstraint(t *testing.T) {
-	got := convertTableConstraint("FOREIGN KEY (team_id, user_id) REFERENCES teams(id)", TableSchema{}, nil)
+	got := convertTableConstraint("FOREIGN KEY (team_id, user_id) REFERENCES teams(id)", TableSchema{}, nil, nil)
 	want := `FOREIGN KEY ("team_id", "user_id") REFERENCES "teams" ("id")`
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)

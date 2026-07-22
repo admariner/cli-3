@@ -177,13 +177,13 @@ func TestConvertCheckExprKeywordsNotQuotedAsColumns(t *testing.T) {
 		{Name: "and", Type: "INTEGER"},
 		{Name: "end", Type: "INTEGER"},
 	}}
-	got := convertCheckExpr("a > 0 AND b < 5", table)
+	got := convertCheckExpr("a > 0 AND b < 5", table, nil)
 	want := `"a" > 0 AND "b" < 5`
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
 	// A keyword-named column can still be referenced when quoted in the source DDL.
-	got = convertCheckExpr(`"end" > 0`, table)
+	got = convertCheckExpr(`"end" > 0`, table, nil)
 	want = `"end" > 0`
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
@@ -202,13 +202,168 @@ func TestConvertCheckExprBracketAndBacktickIdentifiers(t *testing.T) {
 		"[unknown] > 0": `"unknown" > 0`,
 	}
 	for expr, want := range cases {
-		if got := convertCheckExpr(expr, table); got != want {
+		if got := convertCheckExpr(expr, table, nil); got != want {
 			t.Fatalf("convertCheckExpr(%q) = %q, want %q", expr, got, want)
 		}
 	}
 	ddl := convertTablesDDL(t, "CREATE TABLE t (\"Age\" INTEGER, CHECK ([Age] >= 0));")
 	if !strings.Contains(ddl, `CHECK ("Age" >= 0)`) {
 		t.Fatalf("expected bracket identifier converted in CHECK:\n%s", ddl)
+	}
+	assertValidPostgresDDL(t, ddl)
+}
+
+func booleanColumnCtx(columns ...string) *TypeCoercionContext {
+	cols := make(map[string][]string, len(columns))
+	for _, c := range columns {
+		cols[c] = []string{"0", "1"}
+	}
+	return &TypeCoercionContext{Samples: ColumnSamples{"t": cols}}
+}
+
+func TestConvertCheckExprBooleanLiteralRewrite(t *testing.T) {
+	table := TableSchema{Name: "t", Columns: []ColumnSchema{
+		{Name: "is_active", Type: "INTEGER"},
+		{Name: "other", Type: "INTEGER"},
+	}}
+	ctx := booleanColumnCtx("is_active")
+
+	cases := map[string]string{
+		"is_active = 1":                `"is_active" = true`,
+		"is_active = 0":                `"is_active" = false`,
+		"is_active <> 0":               `"is_active" <> false`,
+		"is_active != 1":               `"is_active" != true`,
+		"is_active <= 1":               `"is_active" <= true`,
+		"is_active IS 1":               `"is_active" IS true`,
+		"is_active IS NOT 0":           `"is_active" IS NOT false`,
+		"is_active IS DISTINCT FROM 1": `"is_active" IS DISTINCT FROM true`,
+		"is_active == 1":               `"is_active" = true`,
+		"0 = is_active":                `false = "is_active"`,
+		"1 <> is_active":               `true <> "is_active"`,
+		"1 IS is_active":               `"is_active" IS true`,
+		"0 IS NOT is_active":           `"is_active" IS NOT false`,
+		"1 == is_active":               `true = "is_active"`,
+		"is_active IN (0, 1)":          `"is_active" IN (false, true)`,
+		"is_active NOT IN (0, 1)":      `"is_active" NOT IN (false, true)`,
+		"is_active BETWEEN 0 AND 1":    `"is_active" BETWEEN false AND true`,
+		"is_active IN (1,0)":           `"is_active" IN (true,false)`,
+		"NOT is_active IN (0,1)":       `NOT "is_active" IN (false,true)`,
+		"other = 1":                    `"other" = 1`,
+		"other = 0":                    `"other" = 0`,
+		"is_active = 2":                `"is_active" = 2`,
+		"is_active = 1 AND other = 1":  `"is_active" = true AND "other" = 1`,
+		"other = 'is_active = 1'":      `"other" = 'is_active = 1'`,
+	}
+	for expr, want := range cases {
+		if got := convertCheckExpr(expr, table, ctx); got != want {
+			t.Errorf("convertCheckExpr(%q) = %q, want %q", expr, got, want)
+		}
+	}
+
+	quotedTable := TableSchema{Name: "t", Columns: []ColumnSchema{{Name: "is'active", Type: "INTEGER"}}}
+	if got := convertCheckExpr("[is'active] = 1", quotedTable, booleanColumnCtx("is'active")); got != `"is'active" = true` {
+		t.Fatalf("quoted column: got %q", got)
+	}
+}
+
+func TestConvertCheckExprBooleanLiteralRewritePreservesDecimals(t *testing.T) {
+	table := TableSchema{Name: "t", Columns: []ColumnSchema{
+		{Name: "is_active", Type: "INTEGER"},
+	}}
+	ctx := booleanColumnCtx("is_active")
+
+	cases := map[string]string{
+		"is_active = 0.0":             `"is_active" = 0.0`,
+		"is_active = 1.0":             `"is_active" = 1.0`,
+		"0.0 = is_active":             `0.0 = "is_active"`,
+		"is_active BETWEEN 0 AND 1.0": `"is_active" BETWEEN 0 AND 1.0`,
+		"is_active BETWEEN 0.0 AND 1": `"is_active" BETWEEN 0.0 AND 1`,
+		"is_active IN (0, 1.5)":       `"is_active" IN (0, 1.5)`,
+		"is_active = 10":              `"is_active" = 10`,
+		"is_active = 1e0":             `"is_active" = 1e0`,
+		"is_active = 1.":              `"is_active" = 1.`,
+		"is_active = 1.e0":            `"is_active" = 1.e0`,
+		"is_active = 0x1":             `"is_active" = 0x1`,
+		"is_active = 1_0":             `"is_active" = 1_0`,
+		"is_active = 1 + 0":           `"is_active" = 1 + 0`,
+		"- 1 = is_active":             `- 1 = "is_active"`,
+	}
+	for expr, want := range cases {
+		if got := convertCheckExpr(expr, table, ctx); got != want {
+			t.Errorf("convertCheckExpr(%q) = %q, want %q", expr, got, want)
+		}
+	}
+}
+
+func TestConvertCheckExprBooleanRewriteRequiresContext(t *testing.T) {
+	table := TableSchema{Name: "t", Columns: []ColumnSchema{{Name: "is_active", Type: "INTEGER"}}}
+	got := convertCheckExpr("is_active IN (0, 1)", table, nil)
+	want := `"is_active" IN (0, 1)`
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestConvertCheckConstraintBooleanLiteralRewrite(t *testing.T) {
+	sql := `CREATE TABLE t (
+  id INTEGER PRIMARY KEY,
+  is_active INTEGER NOT NULL DEFAULT 0,
+  CHECK (is_active IN (0,1))
+);
+INSERT INTO t (id, is_active) VALUES (1, 0), (2, 1);
+`
+	ddl := convertTablesDDL(t, sql)
+	if !strings.Contains(ddl, `"is_active" BOOLEAN`) {
+		t.Fatalf("expected is_active to be coerced to BOOLEAN:\n%s", ddl)
+	}
+	if !strings.Contains(ddl, `CHECK ("is_active" IN (false,true))`) {
+		t.Fatalf("expected CHECK literals rewritten to boolean literals:\n%s", ddl)
+	}
+	assertValidPostgresDDL(t, ddl)
+
+	// Column-level CHECK, and a reversed-operand comparison against the boolean default.
+	sql = `CREATE TABLE t2 (
+  id INTEGER PRIMARY KEY,
+  is_active INTEGER NOT NULL DEFAULT 0 CHECK (0 = is_active OR is_active = 1)
+);
+INSERT INTO t2 (id, is_active) VALUES (1, 0), (2, 1);
+`
+	ddl = convertTablesDDL(t, sql)
+	if !strings.Contains(ddl, `"is_active" BOOLEAN`) {
+		t.Fatalf("expected is_active to be coerced to BOOLEAN:\n%s", ddl)
+	}
+	if !strings.Contains(ddl, `CHECK (false = "is_active" OR "is_active" = true)`) {
+		t.Fatalf("expected column-level CHECK literals rewritten to boolean literals:\n%s", ddl)
+	}
+	assertValidPostgresDDL(t, ddl)
+
+	sql = `CREATE TABLE t3 (
+  id INTEGER PRIMARY KEY,
+  is_active INTEGER NOT NULL DEFAULT 0 CHECK (is_active IS 0 OR is_active NOT IN (0,1))
+);
+INSERT INTO t3 (id, is_active) VALUES (1, 0), (2, 1);
+`
+	ddl = convertTablesDDL(t, sql)
+	if !strings.Contains(ddl, `CHECK ("is_active" IS false OR "is_active" NOT IN (false,true))`) {
+		t.Fatalf("expected IS and NOT IN literals rewritten to boolean literals:\n%s", ddl)
+	}
+	assertValidPostgresDDL(t, ddl)
+}
+
+func TestConvertCheckConstraintBooleanLiteralRewriteIgnoresNonBooleanColumn(t *testing.T) {
+	sql := `CREATE TABLE t (
+  id INTEGER PRIMARY KEY,
+  status INTEGER NOT NULL DEFAULT 0,
+  CHECK (status IN (0, 1, 2))
+);
+INSERT INTO t (id, status) VALUES (1, 0), (2, 1), (3, 2);
+`
+	ddl := convertTablesDDL(t, sql)
+	if strings.Contains(ddl, `"status" BOOLEAN`) {
+		t.Fatalf("status has a non-0/1 sampled value and must not be coerced to BOOLEAN:\n%s", ddl)
+	}
+	if !strings.Contains(ddl, `CHECK ("status" IN (0, 1, 2))`) {
+		t.Fatalf("expected CHECK literals left untouched for a non-boolean column:\n%s", ddl)
 	}
 	assertValidPostgresDDL(t, ddl)
 }
