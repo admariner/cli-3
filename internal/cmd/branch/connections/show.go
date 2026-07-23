@@ -217,7 +217,7 @@ func printHumanConnectionList(out io.Writer, list live.ConnectionList, topology 
 			writeHumanField(out, "database", conn.DatabaseName)
 		}
 		fmt.Fprintln(out, "query:")
-		fmt.Fprintln(out, conn.QueryText)
+		fmt.Fprintln(out, live.SanitizeMultilineDisplayText(conn.QueryText))
 	}
 }
 
@@ -237,7 +237,7 @@ func vitessHumanFields(conn live.Connection) [][2]string {
 }
 
 func writeHumanField(out io.Writer, name, value string) {
-	fmt.Fprintf(out, "%-16s %s\n", name+":", value)
+	fmt.Fprintf(out, "%-16s %s\n", name+":", live.SanitizeDisplayText(value))
 }
 
 func unreachableInstanceWarning(instances []live.InstanceMeta) string {

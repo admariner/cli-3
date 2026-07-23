@@ -119,6 +119,36 @@ func TestPrintHumanConnectionListUsesVerticalRecordsWithoutTruncatingQueryText(t
 	c.Assert(got, qt.Contains, "query:\n"+longQuery+"\n")
 }
 
+func TestPrintHumanConnectionListStripsTerminalEscapes(t *testing.T) {
+	c := qt.New(t)
+	var out bytes.Buffer
+
+	printHumanConnectionList(&out, live.ConnectionList{
+		CapturedAt: time.Date(2026, 4, 29, 12, 34, 56, 0, time.UTC),
+		Connections: []live.Connection{
+			{
+				PID:             42,
+				Instance:        "primary",
+				InstanceRole:    "primary",
+				State:           "active",
+				Username:        "alice\x1b[31m",
+				ApplicationName: "\x1b]52;c;YWJj\x07app",
+				ClientAddr:      "10.0.0.1\rSPOOF",
+				QueryText:       "SELECT 1\x1b]8;;https://evil.example\x07\nFROM t",
+			},
+		},
+	}, ListTopology{})
+
+	got := out.String()
+	c.Assert(got, qt.Not(qt.Contains), "\x1b")
+	c.Assert(got, qt.Not(qt.Contains), "\x07")
+	c.Assert(got, qt.Not(qt.Contains), "\r")
+	c.Assert(got, qt.Contains, "user:            alice[31m\n")
+	c.Assert(got, qt.Contains, "application:     ]52;c;YWJjapp\n")
+	c.Assert(got, qt.Contains, "client_addr:     10.0.0.1SPOOF\n")
+	c.Assert(got, qt.Contains, "query:\nSELECT 1]8;;https://evil.example\nFROM t\n")
+}
+
 func TestPrintListPostgresHumanUnchanged(t *testing.T) {
 	c := qt.New(t)
 	queryID := "primary-123-query"

@@ -136,3 +136,21 @@ func TestBlockerLabelDescribesAbsentAndCycleRows(t *testing.T) {
 	c.Assert(strings.Contains(label, "…"), qt.IsTrue)
 	c.Assert(strings.Contains(label, "qa-block-holde "), qt.IsFalse)
 }
+
+func TestBlockerLabelStripsTerminalEscapes(t *testing.T) {
+	c := qt.New(t)
+	label := blockerLabel(blockerRow{
+		PID:     42,
+		Present: true,
+		Connection: live.Connection{
+			ApplicationName: "\x1b]52;c;YWJj\x07holder",
+			State:           "active",
+			QueryText:       "SELECT 1\x1b[31m",
+		},
+	})
+	c.Assert(label, qt.Not(qt.Contains), "\x1b")
+	c.Assert(label, qt.Not(qt.Contains), "\x07")
+	c.Assert(stripANSI(label), qt.Contains, "]52;c;YWJjhol")
+	c.Assert(stripANSI(label), qt.Contains, "SELECT 1[31m")
+	c.Assert(stripANSI(label), qt.Not(qt.Contains), "holder") // truncated in the APP column
+}

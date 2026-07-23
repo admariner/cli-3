@@ -709,7 +709,7 @@ func renderSelectedStatus(state tableState) string {
 
 	conn := state.List.Connections[state.Selected]
 	status := fmt.Sprintf("selected pid %d", conn.PID)
-	query := strings.Join(strings.Fields(conn.QueryText), " ")
+	query := strings.Join(strings.Fields(sanitizeFooterText(conn.QueryText)), " ")
 	if query != "" {
 		status += " | " + query
 	}
@@ -718,7 +718,7 @@ func renderSelectedStatus(state tableState) string {
 
 // queryPreview returns the collapsed query text shown in the final table column.
 func queryPreview(query string) string {
-	collapsed := strings.Join(strings.Fields(query), " ")
+	collapsed := strings.Join(strings.Fields(sanitizeFooterText(query)), " ")
 	return truncateRunes(collapsed, queryPreviewLimit)
 }
 
@@ -1031,6 +1031,7 @@ func appText(name string) string {
 }
 
 func appTextForWidth(name string, width int) string {
+	name = sanitizeFooterText(name)
 	if name == "" {
 		return "-"
 	}
@@ -1124,6 +1125,7 @@ func formatTime(t *time.Time) string {
 }
 
 func emptyDash(value string) string {
+	value = sanitizeFooterText(value)
 	if strings.TrimSpace(value) == "" {
 		return "-"
 	}
@@ -1317,10 +1319,5 @@ func truncateRunes(value string, limit int) string {
 }
 
 func sanitizeFooterText(value string) string {
-	return strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
-			return -1
-		}
-		return r
-	}, value)
+	return live.SanitizeDisplayText(value)
 }
