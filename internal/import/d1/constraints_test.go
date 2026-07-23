@@ -123,6 +123,17 @@ func TestConvertReferencesClauseDropsInjectionTail(t *testing.T) {
 	}
 }
 
+func TestConvertTableForeignKeyDropsUnparseableReferences(t *testing.T) {
+	for _, clause := range []string{
+		`FOREIGN KEY (user_id) REFERENCES invalid`,
+		`CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES invalid`,
+	} {
+		if got := convertTableConstraint(clause, TableSchema{}, nil, nil); got != "" {
+			t.Errorf("unparseable table REFERENCES must be omitted, got %q", got)
+		}
+	}
+}
+
 // End-to-end: attacker dumps smuggle "); DROP ...; CREATE TABLE ..." after a real
 // REFERENCES ... ON DELETE CASCADE close. Parse must stop at the balanced CREATE TABLE
 // close, and conversion must never emit the injected statements into executed DDL.

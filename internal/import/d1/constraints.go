@@ -84,7 +84,7 @@ func convertNamedConstraint(clause string, table TableSchema, all []TableSchema,
 	}
 	converted := convertTableConstraint(body, table, all, ctx)
 	if converted == "" {
-		return clause
+		return ""
 	}
 	return "CONSTRAINT " + postgres.QuoteIdentifier(name) + " " + converted
 }
@@ -373,6 +373,9 @@ func convertForeignKeyConstraint(clause string, table TableSchema, all []TableSc
 	}
 	cols := quoteColumnListFor(m[1], &table)
 	refs := convertReferencesClause(strings.TrimSpace(m[2]), all)
+	if cols == "" || refs == "" {
+		return ""
+	}
 	return "FOREIGN KEY (" + cols + ") " + refs
 }
 
