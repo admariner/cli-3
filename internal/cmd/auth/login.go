@@ -33,6 +33,7 @@ func LoginCmd(ch *cmdutil.Helper) *cobra.Command {
 				return errors.New("the 'login' command requires an interactive shell (use --format json; browser opens when possible, then polls until approved)")
 			}
 
+			clientID, clientSecret = resolveOAuthClient(clientID, clientSecret)
 			authenticator, err := psauth.New(cleanhttp.DefaultClient(), clientID, clientSecret, psauth.SetBaseURL(authURL))
 			if err != nil {
 				if jsonMode {
@@ -126,8 +127,7 @@ func LoginCmd(ch *cmdutil.Helper) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&clientID, "client-id", psauth.OAuthClientID, "The client ID for the PlanetScale CLI application.")
-	cmd.Flags().StringVar(&clientSecret, "client-secret", psauth.OAuthClientSecret, "The client ID for the PlanetScale CLI application")
+	addOAuthClientFlags(cmd, &clientID, &clientSecret)
 	cmd.Flags().StringVar(&authURL, "api-url", psauth.DefaultBaseURL, "The PlanetScale Auth API base URL.")
 
 	return cmd

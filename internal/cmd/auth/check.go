@@ -1,7 +1,6 @@
 package auth
 
 import (
-	psauth "github.com/planetscale/cli/internal/auth"
 	"github.com/planetscale/cli/internal/cmdutil"
 	"github.com/planetscale/cli/internal/printer"
 
@@ -49,7 +48,7 @@ func CheckCmd(ch *cmdutil.Helper) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&clientID, "client-id", psauth.OAuthClientID, "The client ID for the PlanetScale CLI application.")
-	cmd.Flags().StringVar(&clientSecret, "client-secret", psauth.OAuthClientSecret, "The client ID for the PlanetScale CLI application")
+	// Kept for flag compatibility; auth check does not use OAuth client credentials.
+	addOAuthClientFlags(cmd, &clientID, &clientSecret)
 	return cmd
 }
