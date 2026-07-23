@@ -313,7 +313,7 @@ func convertUUIDDefault(def string) (string, bool) {
 }
 
 // validatedSingleQuotedLiteral accepts a complete SQLite/Postgres single-quoted string
-// literal (with '' escapes) and rejects unclosed quotes or trailing junk after the
+// literal (with doubled-apostrophe escapes) and rejects unclosed quotes or trailing junk after the
 // closing quote — both of which can break out of DEFAULT into adjacent SQL.
 func validatedSingleQuotedLiteral(s string) (string, bool) {
 	s = strings.TrimSpace(s)
