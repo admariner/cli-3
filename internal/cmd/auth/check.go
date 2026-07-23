@@ -8,9 +8,6 @@ import (
 )
 
 func CheckCmd(ch *cmdutil.Helper) *cobra.Command {
-	var clientID string
-	var clientSecret string
-
 	cmd := &cobra.Command{
 		Use:   "check",
 		Args:  cobra.NoArgs,
@@ -48,7 +45,5 @@ func CheckCmd(ch *cmdutil.Helper) *cobra.Command {
 		},
 	}
 
-	// Kept for flag compatibility; auth check does not use OAuth client credentials.
-	addOAuthClientFlags(cmd, &clientID, &clientSecret)
 	return cmd
 }

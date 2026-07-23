@@ -18,8 +18,14 @@ func TestAuthLogoutHelpOmitsOAuthSecrets(t *testing.T) {
 	assertHelpOmitsOAuthSecrets(t, LogoutCmd(&cmdutil.Helper{}))
 }
 
-func TestAuthCheckHelpOmitsOAuthSecrets(t *testing.T) {
-	assertHelpOmitsOAuthSecrets(t, CheckCmd(&cmdutil.Helper{}))
+func TestAuthCheckHasNoOAuthClientFlags(t *testing.T) {
+	cmd := CheckCmd(&cmdutil.Helper{})
+	if cmd.Flags().Lookup("client-id") != nil {
+		t.Fatal("auth check must not define --client-id")
+	}
+	if cmd.Flags().Lookup("client-secret") != nil {
+		t.Fatal("auth check must not define --client-secret")
+	}
 }
 
 func assertHelpOmitsOAuthSecrets(t *testing.T, cmd *cobra.Command) {
