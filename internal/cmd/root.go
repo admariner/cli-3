@@ -22,6 +22,7 @@ import (
 	"io/fs"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -414,15 +415,25 @@ func initConfig() {
 	// If no configFile is passed:
 	// 1. Check local git repo for a config file
 	// 2. If not in a git repo. Check working directory for a config file
+	// Only org/database/branch are accepted from project-scoped files — never
+	// api-url, tokens, or other security-sensitive settings.
 	if cfgFile == "" {
+		var projectDir string
 		if rootDir, err := config.RootGitRepoDir(); err == nil {
-			viper.AddConfigPath(rootDir)
-			viper.SetConfigName(config.ProjectConfigFile())
-			_ = viper.MergeInConfig()
+			projectDir = rootDir
 		} else if localDir, err := config.LocalDir(); err == nil {
-			viper.AddConfigPath(localDir)
-			viper.SetConfigName(config.ProjectConfigFile())
-			_ = viper.MergeInConfig()
+			projectDir = localDir
+		}
+		if projectDir != "" {
+			ignored, err := config.MergeProjectConfig(viper.GetViper(), projectDir)
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(cmdutil.FatalErrExitCode)
+			}
+			config.WarnIgnoredProjectConfigKeys(
+				filepath.Join(projectDir, config.ProjectConfigFile()),
+				ignored,
+			)
 		}
 	}
 
