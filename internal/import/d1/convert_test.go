@@ -651,3 +651,86 @@ func TestConvertGeneratedColumnHasNoDefault(t *testing.T) {
 		t.Fatalf("generated column must not also emit DEFAULT: %q", got)
 	}
 }
+
+// Unrecognized DEFAULT expressions on typed columns must never be emitted verbatim:
+// an unbalanced ")" plus ";" escapes CREATE TABLE and injects arbitrary SQL into psql.
+func TestConvertDefaultRejectsSQLInjectionOnIntegerColumn(t *testing.T) {
+	cases := []string{
+		`(0)); DROP TABLE users; --`,
+		`0); DROP TABLE users; --`,
+		`1; DROP TABLE users; --`,
+		`(1) + (SELECT 1)`,
+	}
+	for _, def := range cases {
+		got, ok := convertDefault(def, "BIGINT")
+		if ok || got != "" {
+			t.Fatalf("convertDefault(%q, BIGINT) = %q, ok=%v; must omit unrecognized/hostile defaults", def, got, ok)
+		}
+	}
+
+	ddl := convertTablesDDL(t, `CREATE TABLE evil (n INTEGER DEFAULT (0));`)
+	if strings.Contains(strings.ToUpper(ddl), "DROP TABLE") {
+		t.Fatalf("injected DROP must not appear in converted DDL:\n%s", ddl)
+	}
+
+	// Direct regression for the reported payload shape on a BIGINT column.
+	col := ColumnSchema{Name: "n", Type: "INTEGER", DefaultValue: `(0)); DROP TABLE users; --`}
+	table := TableSchema{Name: "t", Columns: []ColumnSchema{col}}
+	got := convertColumn(col, table, []TableSchema{table}, nil)
+	if strings.Contains(strings.ToUpper(got), "DROP TABLE") || strings.Contains(got, ");") {
+		t.Fatalf("hostile default must not appear in column DDL: %q", got)
+	}
+	if strings.Contains(got, "DEFAULT") {
+		t.Fatalf("hostile default must be omitted entirely: %q", got)
+	}
+	assertValidPostgresDDL(t, ddl)
+}
+
+func TestConvertDefaultKeepsSafeNumericLiterals(t *testing.T) {
+	cases := map[string]struct {
+		def    string
+		pgType string
+		want   string
+	}{
+		"bare zero":           {"0", "BIGINT", "0"},
+		"parenthesized zero":  {"(0)", "BIGINT", "0"},
+		"nested parens":       {"((-1))", "BIGINT", "-1"},
+		"float":               {"1.5", "DOUBLE PRECISION", "1.5"},
+		"parenthesized float": {"(3.14)", "NUMERIC", "3.14"},
+	}
+	for name, tc := range cases {
+		got, ok := convertDefault(tc.def, tc.pgType)
+		if !ok || got != tc.want {
+			t.Fatalf("%s: convertDefault(%q, %q) = %q, ok=%v; want %q", name, tc.def, tc.pgType, got, ok, tc.want)
+		}
+	}
+}
+
+func TestConvertDefaultRejectsBrokenQuotedLiteral(t *testing.T) {
+	cases := []string{
+		`'foo'); DROP TABLE users; --`,
+		`'unclosed`,
+		`"active"); DROP TABLE users; --`,
+	}
+	for _, def := range cases {
+		got, ok := convertDefault(def, "TEXT")
+		if ok || got != "" {
+			t.Fatalf("convertDefault(%q, TEXT) = %q, ok=%v; must reject broken quotes", def, got, ok)
+		}
+		got, ok = convertDefault(def, "BIGINT")
+		if ok || got != "" {
+			t.Fatalf("convertDefault(%q, BIGINT) = %q, ok=%v; must reject broken quotes", def, got, ok)
+		}
+	}
+}
+
+func TestConvertDefaultUUIDRejectsInjection(t *testing.T) {
+	got, ok := convertDefault(`x'); DROP TABLE users; --`, "UUID")
+	if ok || got != "" {
+		t.Fatalf("UUID default must not quote hostile bare input: got %q ok=%v", got, ok)
+	}
+	got, ok = convertDefault(`550e8400-e29b-41d4-a716-446655440000`, "UUID")
+	if !ok || got != `'550e8400-e29b-41d4-a716-446655440000'` {
+		t.Fatalf("safe bare UUID = %q ok=%v", got, ok)
+	}
+}

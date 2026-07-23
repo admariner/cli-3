@@ -69,7 +69,18 @@ func ParseDump(path string) ([]TableSchema, error) {
 		if current == nil {
 			return
 		}
-		current.RawDDL = strings.Join(ddlLines, "\n")
+		raw := strings.Join(ddlLines, "\n")
+		// Truncate at the CREATE TABLE's balanced column-list close so trailing
+		// attacker statements on the same line never become part of RawDDL.
+		if start := strings.Index(raw, "("); start >= 0 {
+			if end, ok := matchingParenEnd(raw, start); ok {
+				raw = strings.TrimSpace(raw[:end+1])
+				if !strings.HasSuffix(raw, ";") {
+					raw += ";"
+				}
+			}
+		}
+		current.RawDDL = raw
 		current.Columns, current.Constraints = parseTableBody(current.RawDDL)
 		tables = append(tables, *current)
 		current = nil
@@ -131,8 +142,14 @@ func ParseDump(path string) ([]TableSchema, error) {
 
 func parseTableBody(ddl string) ([]ColumnSchema, []string) {
 	start := strings.Index(ddl, "(")
-	end := strings.LastIndex(ddl, ")")
-	if start < 0 || end <= start {
+	if start < 0 {
+		return nil, nil
+	}
+	// Match the opening paren of the column list — never strings.LastIndex.
+	// A dump that smuggles "); DROP ...; CREATE TABLE ..." after the real close
+	// would otherwise pull attacker SQL into a column/REFERENCES fragment.
+	end, ok := matchingParenEnd(ddl, start)
+	if !ok {
 		return nil, nil
 	}
 	body := stripSQLComments(ddl[start+1 : end])

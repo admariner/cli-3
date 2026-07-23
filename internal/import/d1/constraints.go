@@ -84,7 +84,7 @@ func convertNamedConstraint(clause string, table TableSchema, all []TableSchema,
 	}
 	converted := convertTableConstraint(body, table, all, ctx)
 	if converted == "" {
-		return clause
+		return ""
 	}
 	return "CONSTRAINT " + postgres.QuoteIdentifier(name) + " " + converted
 }
@@ -373,6 +373,9 @@ func convertForeignKeyConstraint(clause string, table TableSchema, all []TableSc
 	}
 	cols := quoteColumnListFor(m[1], &table)
 	refs := convertReferencesClause(strings.TrimSpace(m[2]), all)
+	if cols == "" || refs == "" {
+		return ""
+	}
 	return "FOREIGN KEY (" + cols + ") " + refs
 }
 
@@ -397,10 +400,14 @@ func convertUniqueConstraint(clause string, table TableSchema) string {
 // quoted identifiers case-sensitively, so the referenced table/columns are canonicalized
 // to the actual declared case from all (the full set of parsed tables) rather than quoting
 // whatever case happens to appear in this clause.
+//
+// Unrecognized REFERENCES text and unsafe action tails (statement terminators, extra
+// parentheses, or tokens outside the FK-action grammar) are dropped rather than emitted
+// verbatim into executed DDL.
 func convertReferencesClause(refs string, all []TableSchema) string {
 	m := referencesClauseRe.FindStringSubmatch(refs)
 	if m == nil {
-		return refs
+		return ""
 	}
 	rawTable := firstNonEmpty(m[1], m[2], m[3], m[4])
 	refTable := tableByName(all, rawTable)
@@ -410,11 +417,34 @@ func convertReferencesClause(refs string, all []TableSchema) string {
 	}
 	table := postgres.QuoteIdentifier(tableName)
 	refCols := quoteColumnListFor(m[5], refTable)
-	tail := strings.TrimSpace(m[6])
-	if tail != "" {
-		return "REFERENCES " + table + " (" + refCols + ") " + tail
+	if refCols == "" {
+		return ""
 	}
-	return "REFERENCES " + table + " (" + refCols + ")"
+	out := "REFERENCES " + table + " (" + refCols + ")"
+	if tail := sanitizeReferencesTail(strings.TrimSpace(m[6])); tail != "" {
+		return out + " " + tail
+	}
+	return out
+}
+
+// fkActionTailRe matches a sequence of SQLite/Postgres foreign-key action clauses only.
+// Anything outside this grammar (including ";" / extra ")" that could escape CREATE TABLE)
+// is rejected by sanitizeReferencesTail.
+var fkActionTailRe = regexp.MustCompile(`(?is)^(?:\s*(?:ON\s+(?:DELETE|UPDATE)\s+(?:CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION)|MATCH\s+(?:SIMPLE|FULL|PARTIAL)|NOT\s+DEFERRABLE|DEFERRABLE(?:\s+INITIALLY\s+(?:DEFERRED|IMMEDIATE))?|INITIALLY\s+(?:DEFERRED|IMMEDIATE)))+$`)
+
+// sanitizeReferencesTail returns tail when it is a safe FK action clause list, otherwise "".
+func sanitizeReferencesTail(tail string) string {
+	tail = strings.TrimSpace(tail)
+	if tail == "" {
+		return ""
+	}
+	if strings.ContainsAny(tail, ";()") {
+		return ""
+	}
+	if !fkActionTailRe.MatchString(tail) {
+		return ""
+	}
+	return strings.Join(strings.Fields(tail), " ")
 }
 
 // quoteColumnList quotes a comma-separated column list, stripping SQLite indexed-column
