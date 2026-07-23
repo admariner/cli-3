@@ -1,7 +1,6 @@
 package auth
 
 import (
-	psauth "github.com/planetscale/cli/internal/auth"
 	"github.com/planetscale/cli/internal/cmdutil"
 	"github.com/planetscale/cli/internal/printer"
 
@@ -9,9 +8,6 @@ import (
 )
 
 func CheckCmd(ch *cmdutil.Helper) *cobra.Command {
-	var clientID string
-	var clientSecret string
-
 	cmd := &cobra.Command{
 		Use:   "check",
 		Args:  cobra.NoArgs,
@@ -49,7 +45,5 @@ func CheckCmd(ch *cmdutil.Helper) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&clientID, "client-id", psauth.OAuthClientID, "The client ID for the PlanetScale CLI application.")
-	cmd.Flags().StringVar(&clientSecret, "client-secret", psauth.OAuthClientSecret, "The client ID for the PlanetScale CLI application")
 	return cmd
 }

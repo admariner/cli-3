@@ -33,6 +33,7 @@ func LogoutCmd(ch *cmdutil.Helper) *cobra.Command {
 				_ = waitForEnter(cmd.InOrStdin())
 			}
 
+			clientID, clientSecret = resolveOAuthClient(clientID, clientSecret)
 			authenticator, err := auth.New(cleanhttp.DefaultClient(), clientID, clientSecret, auth.SetBaseURL(apiURL))
 			if err != nil {
 				return err
@@ -56,8 +57,7 @@ func LogoutCmd(ch *cmdutil.Helper) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&clientID, "client-id", auth.OAuthClientID, "The client ID for the PlanetScale CLI application.")
-	cmd.Flags().StringVar(&clientSecret, "client-secret", auth.OAuthClientSecret, "The client ID for the PlanetScale CLI application")
+	addOAuthClientFlags(cmd, &clientID, &clientSecret)
 	cmd.Flags().StringVar(&apiURL, "api-url", auth.DefaultBaseURL, "The PlanetScale base API URL.")
 	return cmd
 }
